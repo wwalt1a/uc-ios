@@ -4,12 +4,11 @@ import SwiftUI
 /// floating accessory for the primary push action.
 struct HomeView: View {
     @Bindable var vm: AppViewModel
-    var deviceClipboard: Clipboard?
 
     @State private var lastPushedAt: Date?
 
     private var inSync: Bool {
-        guard let s = vm.serverLatest, let d = deviceClipboard else { return false }
+        guard let s = vm.serverLatest, let d = vm.deviceClipboard else { return false }
         return Clipboard.hashMatches(expected: s.hash, actual: d.hash ?? "")
             && s.hash != nil && d.hash != nil
     }
@@ -29,7 +28,7 @@ struct HomeView: View {
                 connector
 
                 DeviceClipboardCard(
-                    entry: deviceClipboard,
+                    entry: vm.deviceClipboard,
                     inSyncWithServer: inSync,
                     lastPushedAt: lastPushedAt
                 )
@@ -38,7 +37,10 @@ struct HomeView: View {
             .padding(.top, 8)
             .padding(.bottom, 110) // leave room for the floating bar
         }
-        .refreshable { await vm.refresh() }
+        .refreshable {
+            vm.readPasteboard()
+            await vm.refresh()
+        }
         .scrollContentBackground(.hidden)
         .background(Color(.systemGroupedBackground))
         .navigationTitle("剪贴板")
@@ -53,6 +55,7 @@ struct HomeView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
+                    vm.readPasteboard()
                     Task { await vm.refresh() }
                 } label: {
                     if vm.isRefreshing {
@@ -68,7 +71,7 @@ struct HomeView: View {
             PushAccessoryBar(
                 activeServer: vm.servers.activeConfig,
                 allServers: vm.servers.configs,
-                canPush: !inSync && deviceClipboard != nil,
+                canPush: !inSync && vm.deviceClipboard != nil,
                 onPush: { lastPushedAt = .now },
                 onSelectServer: { id in vm.servers.activeConfigId = id }
             )
@@ -390,8 +393,8 @@ private func formatSize(_ size: Int, kind: Clipboard.Kind) -> String {
 
 // MARK: - Preview
 
-private func previewVM(serverLatest: Clipboard?, lastSyncedAt: Date?) -> AppViewModel {
-    let vm = AppViewModel.preview()
+private func previewVM(serverLatest: Clipboard?, lastSyncedAt: Date?, deviceText: String?) -> AppViewModel {
+    let vm = AppViewModel.preview(deviceText: deviceText)
     vm.serverLatest = serverLatest
     vm.lastSyncedAt = lastSyncedAt
     return vm
@@ -399,30 +402,36 @@ private func previewVM(serverLatest: Clipboard?, lastSyncedAt: Date?) -> AppView
 
 #Preview("Home — 不一致") {
     NavigationStack {
-        HomeView(
-            vm: previewVM(serverLatest: Mock.serverLatest, lastSyncedAt: Mock.serverLastSyncedAt),
-            deviceClipboard: Mock.deviceClipboard
-        )
+        HomeView(vm: previewVM(
+            serverLatest: Mock.serverLatest,
+            lastSyncedAt: Mock.serverLastSyncedAt,
+            deviceText: Mock.deviceClipboard.text
+        ))
     }
     .tint(.indigo)
 }
 
 #Preview("Home — 已同步") {
+    // Server side and device side must be the same text-typed Clipboard;
+    // image-typed Mock.serverLatest can no longer match a UIPasteboard string.
+    let synced = "Hello, SyncClipboard!"
     NavigationStack {
-        HomeView(
-            vm: previewVM(serverLatest: Mock.serverLatest, lastSyncedAt: Mock.serverLastSyncedAt),
-            deviceClipboard: Mock.serverLatest
-        )
+        HomeView(vm: previewVM(
+            serverLatest: Clipboard.fromText(synced),
+            lastSyncedAt: Mock.serverLastSyncedAt,
+            deviceText: synced
+        ))
     }
     .tint(.indigo)
 }
 
 #Preview("Home — 服务器空") {
     NavigationStack {
-        HomeView(
-            vm: previewVM(serverLatest: nil, lastSyncedAt: nil),
-            deviceClipboard: Mock.deviceClipboard
-        )
+        HomeView(vm: previewVM(
+            serverLatest: nil,
+            lastSyncedAt: nil,
+            deviceText: nil
+        ))
     }
     .tint(.indigo)
 }

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// On-the-wire clipboard snapshot. Spec: docs/SYNC_PROTOCOL.md §3.
 public struct Clipboard: Codable, Equatable, Hashable, Sendable {
@@ -72,5 +73,27 @@ public extension Clipboard {
             return true
         }
         return e.uppercased() == actual.uppercased()
+    }
+}
+
+public extension Clipboard {
+    /// §4.1 — SHA-256 of UTF-8 bytes, uppercase hex.
+    static func computeTextHash(_ text: String) -> String {
+        let digest = SHA256.hash(data: Data(text.utf8))
+        return digest.map { String(format: "%02X", $0) }.joined()
+    }
+
+    /// Build a `Clipboard` from a plain device-pasteboard string. Always
+    /// computes the §4.1 hash; `hasData` is false and `size` is the
+    /// grapheme count. The §3.4 long-text overflow transform is the
+    /// publish path's job, not the observe path's.
+    static func fromText(_ text: String) -> Clipboard {
+        Clipboard(
+            type: .text,
+            hash: computeTextHash(text),
+            text: text,
+            hasData: false,
+            size: text.count
+        )
     }
 }

@@ -27,11 +27,8 @@ struct ContentView: View {
         TabView(selection: $selection) {
             Tab("剪贴板", systemImage: "doc.on.clipboard.fill", value: 0) {
                 NavigationStack {
-                    HomeView(
-                        vm: vm,
-                        deviceClipboard: Mock.deviceClipboard
-                    )
-                    .task { await vm.refresh() }
+                    HomeView(vm: vm)
+                        .task { await vm.refresh() }
                 }
             }
             Tab("历史", systemImage: "clock.fill", value: 1) {
