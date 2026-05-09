@@ -6,6 +6,7 @@ struct PushAccessoryBar: View {
     var activeServer: ServerConfig?
     var allServers: [ServerConfig]
     var canPush: Bool
+    var isPushing: Bool = false
     var onPush: () -> Void
     var onSelectServer: (String) -> Void
 
@@ -28,10 +29,16 @@ struct PushAccessoryBar: View {
     private var pushButton: some View {
         Button(action: onPush) {
             HStack(spacing: 10) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.tint)
-                Text("推送当前剪贴板")
+                if isPushing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 22, height: 22)
+                } else {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.tint)
+                }
+                Text(isPushing ? "正在推送…" : "推送当前剪贴板")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
             }
@@ -42,8 +49,8 @@ struct PushAccessoryBar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!canPush || activeServer == nil)
-        .opacity(canPush && activeServer != nil ? 1 : 0.45)
+        .disabled(!canPush || activeServer == nil || isPushing)
+        .opacity((canPush && activeServer != nil && !isPushing) ? 1 : 0.45)
     }
 
     private var serverMenu: some View {

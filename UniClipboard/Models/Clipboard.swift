@@ -96,4 +96,41 @@ public extension Clipboard {
             size: text.count
         )
     }
+
+    /// §3.4 — produce the publishable Clipboard + optional payload bytes
+    /// for a piece of plain text. Long text (> 10240 chars) triggers the
+    /// file-overflow branch: `hasData=true`, `dataName="text_<HASH>.txt"`,
+    /// `text` is only the first 10240 chars, and the payload is the full
+    /// UTF-8 bytes. Short text fits inline: `hasData=false`, full text,
+    /// no payload.
+    ///
+    /// `text.count` (grapheme clusters) is used for the threshold.
+    /// Other clients (Flutter / C#) may use UTF-16 code units; the two
+    /// agree for ASCII and BMP content. Documented interop ambiguity.
+    static func publishText(_ text: String) -> (clipboard: Clipboard, payload: Data?) {
+        let threshold = 10_240
+        let hash = computeTextHash(text)
+        if text.count > threshold {
+            let preview = String(text.prefix(threshold))
+            let dataName = "text_\(hash).txt"
+            let payload = Data(text.utf8)
+            let entry = Clipboard(
+                type: .text,
+                hash: hash,
+                text: preview,
+                hasData: true,
+                dataName: dataName,
+                size: text.count
+            )
+            return (entry, payload)
+        }
+        let entry = Clipboard(
+            type: .text,
+            hash: hash,
+            text: text,
+            hasData: false,
+            size: text.count
+        )
+        return (entry, nil)
+    }
 }

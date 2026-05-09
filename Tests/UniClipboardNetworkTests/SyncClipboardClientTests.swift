@@ -155,6 +155,121 @@ final class SyncClipboardClientTests: XCTestCase {
         await assertThrowsKind(.decodingFailed) { try await self.makeClient().getClipboard() }
     }
 
+    // MARK: - PUT SyncClipboard.json (§2.2)
+
+    private func ok2xxHandler(status: Int = 200) -> MockURLProtocol.Handler {
+        { req in
+            let resp = HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+            return (resp, nil)
+        }
+    }
+
+    private static let shortClip = Clipboard(
+        type: .text,
+        hash: "3F4E62D9F184380BAD1B0F94B5518DCBF35ACB79B34F6D6E34F3DAB16CD7BC8F",
+        text: "Hello, SyncClipboard!",
+        hasData: false,
+        size: 21
+    )
+
+    func test_P1_putClipboard_usesPUT_atSyncClipboardJsonPath() async throws {
+        MockURLProtocol.handler = ok2xxHandler()
+        let client = try makeClient(baseURLString: "https://nas.local:5033/")
+        try await client.putClipboard(Self.shortClip)
+        XCTAssertEqual(MockURLProtocol.lastRequest?.httpMethod, "PUT")
+        XCTAssertEqual(MockURLProtocol.lastRequest?.url?.absoluteString,
+                       "https://nas.local:5033/SyncClipboard.json")
+    }
+
+    func test_P2_putClipboard_setsAuthAndJsonContentType() async throws {
+        MockURLProtocol.handler = ok2xxHandler()
+        let client = try makeClient(username: "alice", password: "secret")
+        try await client.putClipboard(Self.shortClip)
+        let auth = MockURLProtocol.lastRequest?.value(forHTTPHeaderField: "Authorization")
+        let ct = MockURLProtocol.lastRequest?.value(forHTTPHeaderField: "Content-Type")
+        XCTAssertEqual(auth, "Basic YWxpY2U6c2VjcmV0")
+        XCTAssertEqual(ct, "application/json")
+    }
+
+    func test_P3_putClipboard_bodyIsJSONEncodedClipboard() async throws {
+        MockURLProtocol.handler = ok2xxHandler()
+        try await makeClient().putClipboard(Self.shortClip)
+        let body = try XCTUnwrap(MockURLProtocol.lastBody)
+        let decoded = try JSONDecoder().decode(Clipboard.self, from: body)
+        XCTAssertEqual(decoded, Self.shortClip)
+        // §3.1 — null fields must be omitted, not serialized as null.
+        let raw = try XCTUnwrap(String(data: body, encoding: .utf8))
+        XCTAssertFalse(raw.contains("null"), "encoded body must not contain null fields: \(raw)")
+        XCTAssertFalse(raw.contains("dataName"), "dataName MUST be omitted when nil: \(raw)")
+    }
+
+    func test_P4_putClipboard_acceptsAll2xxAsSuccess() async throws {
+        for status in [200, 201, 204] {
+            MockURLProtocol.handler = ok2xxHandler(status: status)
+            try await makeClient().putClipboard(Self.shortClip)
+        }
+    }
+
+    func test_P5a_putClipboard_returns401AsAuthFailed() async {
+        MockURLProtocol.handler = ok2xxHandler(status: 401)
+        await assertThrowsKind(.authFailed) {
+            try await self.makeClient().putClipboard(Self.shortClip)
+        }
+    }
+
+    func test_P5b_putClipboard_returns500AsServerError() async {
+        MockURLProtocol.handler = ok2xxHandler(status: 500)
+        await assertThrowsKind(.serverError(500)) {
+            try await self.makeClient().putClipboard(Self.shortClip)
+        }
+    }
+
+    // MARK: - PUT file/<name> (§2.3)
+
+    func test_P6_putFile_usesPUT_atFilePath_withCorrectHeaders() async throws {
+        MockURLProtocol.handler = ok2xxHandler()
+        let client = try makeClient(baseURLString: "https://nas.local:5033/")
+        let bytes = Data([0xDE, 0xAD, 0xBE, 0xEF])
+        try await client.putFile(name: "text_ABC.txt", body: bytes)
+        XCTAssertEqual(MockURLProtocol.lastRequest?.httpMethod, "PUT")
+        XCTAssertEqual(MockURLProtocol.lastRequest?.url?.absoluteString,
+                       "https://nas.local:5033/file/text_ABC.txt")
+        XCTAssertEqual(
+            MockURLProtocol.lastRequest?.value(forHTTPHeaderField: "Content-Type"),
+            "application/octet-stream"
+        )
+        XCTAssertEqual(
+            MockURLProtocol.lastRequest?.value(forHTTPHeaderField: "Content-Length"),
+            "4"
+        )
+    }
+
+    func test_P7_putFile_bodyIsRawBytes() async throws {
+        MockURLProtocol.handler = ok2xxHandler()
+        let bytes = Data((0..<256).map { UInt8($0) })
+        try await makeClient().putFile(name: "blob.bin", body: bytes)
+        XCTAssertEqual(MockURLProtocol.lastBody, bytes)
+    }
+
+    func test_P8_putFile_rejectsBadFilenamesBeforeNetworkCall() async {
+        MockURLProtocol.handler = { _ in
+            XCTFail("network must NOT be called for invalid filenames")
+            return (HTTPURLResponse(), nil)
+        }
+        for bad in ["a/b", "..\\b", ""] {
+            await assertThrowsKind(.invalidURL) {
+                try await self.makeClient().putFile(name: bad, body: Data())
+            }
+        }
+    }
+
+    func test_P9_putFile_returns401AsAuthFailed() async {
+        MockURLProtocol.handler = ok2xxHandler(status: 401)
+        await assertThrowsKind(.authFailed) {
+            try await self.makeClient().putFile(name: "x.bin", body: Data([0]))
+        }
+    }
+
     // MARK: - Helpers
 
     private func makeClient(

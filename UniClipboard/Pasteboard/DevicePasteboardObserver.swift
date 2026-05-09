@@ -47,6 +47,21 @@ final class DevicePasteboardObserver {
         subscribe()
     }
 
+    /// Write `text` to `UIPasteboard.general`. The system pasteboard's
+    /// `changedNotification` will fire and our subscription will re-read,
+    /// so `current` ends up reflecting the new state without extra
+    /// plumbing. Under env hooks (`UC_DEVICE_TEXT` set), we skip the
+    /// system call to keep simctl/preview recipes hermetic and update
+    /// `current` directly.
+    func write(text: String) {
+        switch envMode {
+        case .live:
+            UIPasteboard.general.string = text
+        case .forceNil, .forceText:
+            current = Clipboard.fromText(text)
+        }
+    }
+
     /// Re-read the pasteboard (or env override). Idempotent; safe to call
     /// from notifications and explicit UI triggers.
     func read() {

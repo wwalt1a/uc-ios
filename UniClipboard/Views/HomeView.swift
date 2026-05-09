@@ -5,8 +5,6 @@ import SwiftUI
 struct HomeView: View {
     @Bindable var vm: AppViewModel
 
-    @State private var lastPushedAt: Date?
-
     private var inSync: Bool {
         guard let s = vm.serverLatest, let d = vm.deviceClipboard else { return false }
         return Clipboard.hashMatches(expected: s.hash, actual: d.hash ?? "")
@@ -17,12 +15,16 @@ struct HomeView: View {
         ScrollView {
             VStack(spacing: 16) {
                 if let err = vm.refreshError {
-                    refreshErrorRow(err)
+                    errorRow(err, prefix: "")
+                }
+                if let err = vm.pushError {
+                    errorRow(err, prefix: String(localized: "推送失败:"))
                 }
 
                 ServerSnapshotCard(
                     entry: vm.serverLatest,
-                    lastSyncedAt: vm.lastSyncedAt
+                    lastSyncedAt: vm.lastSyncedAt,
+                    onApply: { vm.applyServerToDevice() }
                 )
 
                 connector
@@ -30,7 +32,7 @@ struct HomeView: View {
                 DeviceClipboardCard(
                     entry: vm.deviceClipboard,
                     inSyncWithServer: inSync,
-                    lastPushedAt: lastPushedAt
+                    lastPushedAt: vm.lastPushedAt
                 )
             }
             .padding(.horizontal, 16)
@@ -72,7 +74,8 @@ struct HomeView: View {
                 activeServer: vm.servers.activeConfig,
                 allServers: vm.servers.configs,
                 canPush: !inSync && vm.deviceClipboard != nil,
-                onPush: { lastPushedAt = .now },
+                isPushing: vm.isPushing,
+                onPush: { Task { await vm.push() } },
                 onSelectServer: { id in vm.servers.activeConfigId = id }
             )
             .padding(.horizontal, 16)
@@ -81,11 +84,11 @@ struct HomeView: View {
     }
 
     @ViewBuilder
-    private func refreshErrorRow(_ err: SyncError) -> some View {
+    private func errorRow(_ err: SyncError, prefix: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
-            Text(errorMessage(err))
+            Text(prefix.isEmpty ? errorMessage(err) : "\(prefix) \(errorMessage(err))")
                 .font(.footnote)
                 .foregroundStyle(.primary)
                 .lineLimit(2)
@@ -112,14 +115,29 @@ struct HomeView: View {
 
     private var connector: some View {
         HStack(spacing: 8) {
-            Image(systemName: inSync ? "checkmark.circle.fill" : "arrow.up.arrow.down.circle")
-                .foregroundStyle(inSync ? .green : .secondary)
-            Text(inSync ? "本机与服务器一致" : "本机与服务器不一致 · 可推送")
+            Image(systemName: connectorIcon)
+                .foregroundStyle(connectorTint)
+            Text(connectorText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer()
         }
         .padding(.horizontal, 8)
+    }
+
+    private var connectorIcon: String {
+        if vm.deviceClipboard == nil { return "circle.dashed" }
+        return inSync ? "checkmark.circle.fill" : "arrow.up.arrow.down.circle"
+    }
+
+    private var connectorTint: Color {
+        if vm.deviceClipboard == nil { return .secondary }
+        return inSync ? .green : .secondary
+    }
+
+    private var connectorText: LocalizedStringKey {
+        if vm.deviceClipboard == nil { return "本机剪贴板为空" }
+        return inSync ? "本机与服务器一致" : "本机与服务器不一致 · 可推送"
     }
 }
 
@@ -128,6 +146,15 @@ struct HomeView: View {
 private struct ServerSnapshotCard: View {
     let entry: Clipboard?
     let lastSyncedAt: Date?
+    let onApply: () -> Void
+
+    /// Apply-to-device only handles short text this cycle. For long text
+    /// (`hasData=true`) and image/file/group, we'd need §2.4 GET file
+    /// to recover the payload — out of scope.
+    private var canApply: Bool {
+        guard let e = entry else { return false }
+        return e.type == .text && !e.hasData
+    }
 
     var body: some View {
         GlassCard {
@@ -152,23 +179,25 @@ private struct ServerSnapshotCard: View {
 
                     HStack(spacing: 10) {
                         Button {
-                            // apply to local pasteboard
+                            onApply()
                         } label: {
                             Label("应用到本机", systemImage: "arrow.down.to.line")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
+                        .disabled(!canApply)
 
                         if entry.hasData {
                             Button {
-                                // save attachment
+                                // save attachment — needs §2.4 GET file, out of scope
                             } label: {
                                 Label("保存", systemImage: "square.and.arrow.down")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.large)
+                            .disabled(true)
                         }
                     }
                 }

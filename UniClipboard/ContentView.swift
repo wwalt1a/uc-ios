@@ -28,7 +28,18 @@ struct ContentView: View {
             Tab("剪贴板", systemImage: "doc.on.clipboard.fill", value: 0) {
                 NavigationStack {
                     HomeView(vm: vm)
-                        .task { await vm.refresh() }
+                        .task {
+                            await vm.refresh()
+                            // DEBUG hooks for simctl regression — see CLAUDE.md.
+                            // Not feature flags; remove on ship.
+                            let env = ProcessInfo.processInfo.environment
+                            if env["UC_AUTO_PUSH"] == "1" {
+                                await vm.push()
+                            }
+                            if env["UC_AUTO_APPLY"] == "1" {
+                                vm.applyServerToDevice()
+                            }
+                        }
                 }
             }
             Tab("历史", systemImage: "clock.fill", value: 1) {

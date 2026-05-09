@@ -70,6 +70,49 @@ public final class SyncClipboardClient: @unchecked Sendable {
         }
     }
 
+    /// `PUT SyncClipboard.json` — publish clipboard metadata. Spec §2.2.
+    /// If `entry.hasData == true`, the payload file MUST already have been
+    /// uploaded via `putFile(name:body:)` per §3.5 — this method does not
+    /// enforce that itself; callers do.
+    public func putClipboard(_ entry: Clipboard) async throws {
+        let url = baseURL.appendingPathComponent("SyncClipboard.json")
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        do {
+            req.httpBody = try JSONEncoder().encode(entry)
+        } catch {
+            throw SyncError(kind: .decodingFailed, underlying: "\(error)")
+        }
+        let (_, response) = try await perform(req)
+        if let err = SyncError.mapHTTPStatus((response as? HTTPURLResponse)?.statusCode ?? -1) {
+            throw err
+        }
+    }
+
+    /// `PUT file/<name>` — upload payload file. Spec §2.3.
+    /// Rejects names containing `/`, `\`, or empty before any network
+    /// call; spec mandates "MUST NOT contain path separators".
+    public func putFile(name: String, body: Data) async throws {
+        guard !name.isEmpty, !name.contains("/"), !name.contains("\\") else {
+            throw SyncError(kind: .invalidURL, underlying: "invalid filename: \(name)")
+        }
+        let url = baseURL
+            .appendingPathComponent("file")
+            .appendingPathComponent(name)
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        req.setValue("\(body.count)", forHTTPHeaderField: "Content-Length")
+        req.httpBody = body
+        let (_, response) = try await perform(req)
+        if let err = SyncError.mapHTTPStatus((response as? HTTPURLResponse)?.statusCode ?? -1) {
+            throw err
+        }
+    }
+
     // MARK: - Internals
 
     private func perform(_ req: URLRequest) async throws -> (Data, URLResponse) {
