@@ -156,6 +156,9 @@
         }
       }
     },
+    "保存到 Documents" : {
+
+    },
     "保存失败:" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -226,6 +229,9 @@
         }
       }
     },
+    "准备同步…" : {
+
+    },
     "凭据" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -291,6 +297,9 @@
           }
         }
       }
+    },
+    "同步中…" : {
+
     },
     "名称" : {
       "extractionState" : "manual",
@@ -358,6 +367,9 @@
         }
       }
     },
+    "复制内容后会自动同步上传" : {
+
+    },
     "完成" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -412,6 +424,9 @@
           }
         }
       }
+    },
+    "已同步 · 等待新内容" : {
+
     },
     "已添加" : {
       "extractionState" : "manual",
@@ -479,6 +494,9 @@
         }
       }
     },
+    "开启后，服务器有新内容时会立即覆盖本机剪贴板；关闭则只在主页高亮提示，不修改剪贴板。" : {
+
+    },
     "开始配置" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -535,9 +553,6 @@
       }
     },
     "接收超时 — 请稍后重试" : {
-
-    },
-    "推送失败:" : {
 
     },
     "推送当前剪贴板" : {
@@ -619,6 +634,9 @@
           }
         }
       }
+    },
+    "有新内容 · 未自动写入" : {
+
     },
     "服务器" : {
       "extractionState" : "manual",
@@ -734,9 +752,6 @@
         }
       }
     },
-    "本机剪贴板为空" : {
-
-    },
     "正在保存…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -758,9 +773,6 @@
           }
         }
       }
-    },
-    "正在推送…" : {
-
     },
     "正在连接…" : {
       "extractionState" : "manual",
@@ -839,6 +851,9 @@
         }
       }
     },
+    "离线 · 重试中" : {
+
+    },
     "稍后设置" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -871,6 +886,9 @@
           }
         }
       }
+    },
+    "自动写入本机剪贴板" : {
+
     },
     "自动切换" : {
       "extractionState" : "manual",
@@ -928,6 +946,9 @@
       }
     },
     "认证失败 — 请检查用户名和密码" : {
+
+    },
+    "认证失败 · 检查设置" : {
 
     },
     "设为活动" : {

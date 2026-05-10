@@ -9,6 +9,7 @@ struct HomeView: View {
     @Bindable var vm: AppViewModel
 
     private var engineState: SyncEngine.State { vm.engine.state }
+    private var isExplicitlyRefreshing: Bool { vm.engine.isExplicitlyRefreshing }
 
     /// Server has a pending entry waiting for the user (auto-apply off).
     /// Drives card highlight and auto-expanded preview.
@@ -45,7 +46,7 @@ struct HomeView: View {
             .padding(.bottom, 24)
         }
         .refreshable {
-            vm.engine.forceTickNow()
+            await vm.engine.explicitRefresh()
         }
         .scrollContentBackground(.hidden)
         .background(Color(.systemGroupedBackground))
@@ -63,13 +64,13 @@ struct HomeView: View {
                 Button {
                     vm.engine.forceTickNow()
                 } label: {
-                    if engineState == .syncing {
+                    if isExplicitlyRefreshing {
                         ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
-                .disabled(engineState == .syncing)
+                .disabled(isExplicitlyRefreshing)
             }
         }
     }
@@ -107,7 +108,7 @@ struct HomeView: View {
 
     private var connector: some View {
         HStack(spacing: 8) {
-            if engineState == .syncing {
+            if isExplicitlyRefreshing {
                 ProgressView().controlSize(.mini)
             } else {
                 Image(systemName: connectorIcon)
@@ -124,7 +125,6 @@ struct HomeView: View {
     private var connectorIcon: String {
         switch engineState {
         case .idle:             return "circle.dashed"
-        case .syncing:          return "ellipsis.circle"
         case .succeeded:        return "checkmark.circle.fill"
         case .hasNewUnwritten:  return "tray.and.arrow.down.fill"
         case .offlineRetrying:  return "arrow.triangle.2.circlepath"
@@ -138,14 +138,14 @@ struct HomeView: View {
         case .hasNewUnwritten:  return .indigo
         case .offlineRetrying:  return .orange
         case .authFailed:       return .red
-        case .idle, .syncing:   return .secondary
+        case .idle:             return .secondary
         }
     }
 
     private var connectorText: LocalizedStringKey {
+        if isExplicitlyRefreshing { return "同步中…" }
         switch engineState {
         case .idle:             return "准备同步…"
-        case .syncing:          return "同步中…"
         case .succeeded:
             return vm.serverLatest == nil ? "已同步 · 等待新内容" : "已同步"
         case .hasNewUnwritten:  return "有新内容 · 未自动写入"

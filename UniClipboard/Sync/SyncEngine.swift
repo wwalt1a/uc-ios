@@ -44,7 +44,6 @@ import Observation
 final class SyncEngine {
     enum State: Equatable {
         case idle
-        case syncing
         case succeeded
         case hasNewUnwritten
         case offlineRetrying
@@ -59,6 +58,13 @@ final class SyncEngine {
     /// because `appSettings.autoApplyServerChanges == false`. UI can show
     /// it highlighted/expanded. `nil` when nothing is staged.
     private(set) var stagedEntry: Clipboard?
+
+    /// True while a user-explicit tick (pull-to-refresh, toolbar refresh
+    /// button) is in flight. Routine 1Hz ticks DO NOT flip this — the
+    /// connector and toolbar reflect the last stable result state so users
+    /// see "已同步" most of the time instead of a flickering "同步中…"
+    /// every second.
+    private(set) var isExplicitlyRefreshing: Bool = false
 
     @ObservationIgnored
     private weak var viewModel: AppViewModel?
@@ -120,9 +126,17 @@ final class SyncEngine {
     }
 
     /// Run a tick now, ignoring the normal cadence and any offline backoff.
-    /// Used for pull-to-refresh and the toolbar refresh button.
+    /// Marked as an explicit refresh — UI shows a spinner until it
+    /// completes. Used by the toolbar refresh button.
     func forceTickNow() {
-        Task { @MainActor in await self.tick() }
+        Task { @MainActor in await self.tick(explicit: true) }
+    }
+
+    /// Awaitable explicit tick — use from `.refreshable` so the SwiftUI
+    /// pull-to-refresh control keeps its native spinner up until the
+    /// tick actually finishes (rather than flashing for a frame).
+    func explicitRefresh() async {
+        await tick(explicit: true)
     }
 
     /// Clear runtime state without touching persisted hash. Useful when the
@@ -162,17 +176,25 @@ final class SyncEngine {
         }
     }
 
-    private func tick() async {
+    private func tick(explicit: Bool = false) async {
         guard !isTicking else { return }
         isTicking = true
-        defer { isTicking = false }
+        if explicit { isExplicitlyRefreshing = true }
+        defer {
+            isTicking = false
+            if explicit { isExplicitlyRefreshing = false }
+        }
         guard let vm = viewModel,
               let server = vm.servers.activeConfig else {
             state = .idle
             return
         }
         if state == .authFailed { return }
-        state = .syncing
+        // Note: routine 1Hz ticks don't transition to a "syncing"
+        // intermediate state — the visible `state` stays at its last
+        // stable value, so the connector strip doesn't flicker every
+        // second between "同步中…" and "已同步". Explicit refreshes
+        // surface their progress via `isExplicitlyRefreshing` instead.
         do {
             let client = try SyncClipboardClient(
                 server: server,
