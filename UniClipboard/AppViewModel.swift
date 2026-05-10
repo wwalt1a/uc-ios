@@ -102,35 +102,58 @@ final class AppViewModel {
     /// re-read automatically.
     func readPasteboard() { pasteboard.read() }
 
-    /// Write the active server's text clipboard to the device. Short
-    /// text (`hasData=false`) writes synchronously from the metadata
-    /// `text` field. Long text (`hasData=true`) downloads the §2.4
-    /// payload, verifies the §4.4 hash, decodes UTF-8, and writes the
-    /// result. Image/file/group entries are no-ops — apply means "write
-    /// to device pasteboard" and binary entries need UTI handling that
-    /// pairs with the image-push cycle.
+    /// Write the active server's clipboard to the device. Text: short
+    /// path writes from metadata `text`; long path downloads §2.4 payload,
+    /// §4.1-verifies via bytes hash, decodes UTF-8, writes. Image:
+    /// downloads payload, §4.2-verifies (basename + bytes), writes the
+    /// raw bytes under the matching UTI. File/Group are no-ops — file
+    /// bytes have no meaningful UIPasteboard target, group needs §4.3.
     func applyServerToDevice() async {
-        guard let entry = serverLatest, entry.type == .text else { return }
-        if !entry.hasData {
-            pasteboard.write(text: entry.text)
-            applyError = nil
+        guard let entry = serverLatest else { return }
+        switch entry.type {
+        case .text:
+            if !entry.hasData {
+                pasteboard.write(text: entry.text)
+                applyError = nil
+                return
+            }
+            guard !isApplying else { return }
+            guard let server = servers.activeConfig, let dataName = entry.dataName else { return }
+            isApplying = true
+            defer { isApplying = false }
+            do {
+                let client = try SyncClipboardClient(server: server, trustInsecureCert: appSettings.trustInsecureCert)
+                let bytes = try await client.getFile(name: dataName)
+                try Self.verify(bytes: bytes, against: entry)
+                let text = String(decoding: bytes, as: UTF8.self)
+                pasteboard.write(text: text)
+                applyError = nil
+            } catch let e as SyncError {
+                applyError = e
+            } catch {
+                applyError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+            }
+        case .image:
+            guard entry.hasData,
+                  let dataName = entry.dataName,
+                  let server = servers.activeConfig
+            else { return }
+            guard !isApplying else { return }
+            isApplying = true
+            defer { isApplying = false }
+            do {
+                let client = try SyncClipboardClient(server: server, trustInsecureCert: appSettings.trustInsecureCert)
+                let bytes = try await client.getFile(name: dataName)
+                try Self.verify(bytes: bytes, against: entry)
+                pasteboard.write(data: bytes, uti: Self.utiForDataName(dataName), originalName: dataName)
+                applyError = nil
+            } catch let e as SyncError {
+                applyError = e
+            } catch {
+                applyError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+            }
+        case .file, .group:
             return
-        }
-        guard !isApplying else { return }
-        guard let server = servers.activeConfig, let dataName = entry.dataName else { return }
-        isApplying = true
-        defer { isApplying = false }
-        do {
-            let client = try SyncClipboardClient(server: server, trustInsecureCert: appSettings.trustInsecureCert)
-            let bytes = try await client.getFile(name: dataName)
-            try Self.verify(bytes: bytes, against: entry.hash)
-            let text = String(decoding: bytes, as: UTF8.self)
-            pasteboard.write(text: text)
-            applyError = nil
-        } catch let e as SyncError {
-            applyError = e
-        } catch {
-            applyError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
         }
     }
 
@@ -153,7 +176,7 @@ final class AppViewModel {
         do {
             let client = try SyncClipboardClient(server: server, trustInsecureCert: appSettings.trustInsecureCert)
             let bytes = try await client.getFile(name: dataName)
-            try Self.verify(bytes: bytes, against: entry.hash)
+            try Self.verify(bytes: bytes, against: entry)
             let url = try Self.targetURL(for: dataName, relative: appSettings.downloadRelativePath)
             try bytes.write(to: url, options: .atomic)
             lastSavedFileURL = url
@@ -165,12 +188,41 @@ final class AppViewModel {
         }
     }
 
-    private static func verify(bytes: Data, against expected: String?) throws {
-        // §4.4: null/whitespace `expected` matches anything — short-circuits
-        // here because hashMatches returns true in that case, never throws.
-        let actual = Clipboard.computeBytesHash(bytes)
-        guard Clipboard.hashMatches(expected: expected, actual: actual) else {
+    /// §4.4 verify, branching on the entry's type because the hash
+    /// algorithm differs: §4.1 (raw SHA256 over UTF-8 bytes) for text;
+    /// §4.2 (basename-bound) for image/file. Group is unimplemented and
+    /// the caller (saveServerAttachment) gates it out before reaching
+    /// here. Null/whitespace `entry.hash` short-circuits to a pass via
+    /// `hashMatches` semantics.
+    private static func verify(bytes: Data, against entry: Clipboard) throws {
+        let actual: String
+        switch entry.type {
+        case .text:
+            actual = Clipboard.computeBytesHash(bytes)
+        case .image, .file:
+            guard let name = entry.dataName else {
+                throw SyncError(kind: .hashMismatch, underlying: "missing dataName for \(entry.type)")
+            }
+            actual = Clipboard.computeFileHash(name: name, bytes: bytes)
+        case .group:
+            return
+        }
+        guard Clipboard.hashMatches(expected: entry.hash, actual: actual) else {
             throw SyncError(kind: .hashMismatch)
+        }
+    }
+
+    /// Map a payload filename to the UTI used when writing the bytes back
+    /// to UIPasteboard during apply-image. Mirror of the read-side UTI
+    /// table on `DevicePasteboardObserver`.
+    private static func utiForDataName(_ name: String) -> String {
+        let ext = (name as NSString).pathExtension.lowercased()
+        switch ext {
+        case "png":          return "public.png"
+        case "heic", "heif": return "public.heic"
+        case "jpg", "jpeg":  return "public.jpeg"
+        case "gif":          return "com.compuserve.gif"
+        default:             return "public.data"
         }
     }
 
@@ -200,11 +252,15 @@ final class AppViewModel {
 
 extension AppViewModel {
     /// Publish the device clipboard to the active server. Spec §2.2 +
-    /// §2.3 + §3.4 + §3.5. Text-only this cycle.
+    /// §2.3 + §3.4 + §3.5. Text and image; file/group are no-ops (file
+    /// from UIPasteboard isn't meaningful on iOS, group needs §4.3).
     /// - Returns silently if no active server, no device clipboard, or
     ///   already pushing.
-    /// - Long text (>10240 chars) goes file-first per §3.5; failures in
-    ///   the file PUT skip the metadata PUT so the server never sees a
+    /// - Reads the pasteboard fresh via `snapshot()` rather than the
+    ///   cached `current`, so a copy-then-push race produces the
+    ///   semantically-current clipboard not a stale one.
+    /// - Payload-bearing entries go file-first per §3.5; failures in the
+    ///   file PUT skip the metadata PUT so the server never sees a
     ///   metadata pointer to a missing file.
     /// - On success, optimistically updates `serverLatest` to the
     ///   metadata-only entry so the server card reflects reality without
@@ -212,14 +268,16 @@ extension AppViewModel {
     func push() async {
         guard !isPushing else { return }
         guard let server = servers.activeConfig else { return }
-        guard let device = deviceClipboard, device.type == .text else { return }
+        guard let snapshot = pasteboard.snapshot(),
+              snapshot.clipboard.type == .text || snapshot.clipboard.type == .image
+        else { return }
         isPushing = true
         defer { isPushing = false }
         let trustInsecure = appSettings.trustInsecureCert
-        let (entry, payload) = Clipboard.publishText(device.text)
+        let entry = snapshot.clipboard
         do {
             let client = try SyncClipboardClient(server: server, trustInsecureCert: trustInsecure)
-            if let payload, let dataName = entry.dataName {
+            if let payload = snapshot.payload, let dataName = entry.dataName {
                 try await client.putFile(name: dataName, body: payload)
             }
             try await client.putClipboard(entry)

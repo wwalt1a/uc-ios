@@ -58,7 +58,7 @@ final class HashTests: XCTestCase {
         XCTAssertEqual(c.hash, Clipboard.computeTextHash(long))
     }
 
-    // MARK: - computeBytesHash (§4.2)
+    // MARK: - computeBytesHash (§4.1 over UTF-8 bytes)
 
     func test_H6_computeBytesHash_emptyData_matchesKnownSHA256() {
         XCTAssertEqual(
@@ -89,5 +89,71 @@ final class HashTests: XCTestCase {
                 "parity broken for \(sample.debugDescription)"
             )
         }
+    }
+
+    // MARK: - computeFileHash (§4.2) + publishImage
+
+    /// 8×8 red-square PNG, ~70 bytes. Same fixture the simctl stub uses,
+    /// so cross-recipe consistency is locked in: the device's local
+    /// `publishImage` of these bytes produces the same §4.2 hash as the
+    /// stub server's `computeFileHash(name:bytes:)` of the served file.
+    private static let red8x8PNG = Data(base64Encoded:
+        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABGdBTUEAALGP" +
+        "C/xhBQAAAAFzUkdCAK7OHOkAAAAGUExURf8AAP///8jJRKEAAAAOSURBVAjX" +
+        "Y/jPwMDAAAAEAQEAQYxqNwAAAABJRU5ErkJggg=="
+    )!
+
+    func test_F1_computeFileHash_redPNG_matchesSpecAlgorithm() {
+        // Recompose the §4.2 expected value from the spec recipe — if the
+        // function ever drifted to plain SHA256(bytes) (cycle 6's bug), this
+        // would fail.
+        let bytes = Self.red8x8PNG
+        let contentHash = Clipboard.computeBytesHash(bytes)
+        let combined = "image.png|\(contentHash)"
+        let expected = Clipboard.computeBytesHash(Data(combined.utf8))
+        XCTAssertEqual(
+            Clipboard.computeFileHash(name: "image.png", bytes: bytes),
+            expected
+        )
+    }
+
+    func test_F2_computeFileHash_sameBytes_differentName_differentHash() {
+        let bytes = Self.red8x8PNG
+        let h1 = Clipboard.computeFileHash(name: "image.png", bytes: bytes)
+        let h2 = Clipboard.computeFileHash(name: "other.png", bytes: bytes)
+        XCTAssertNotEqual(h1, h2, "basename must bind into the §4.2 hash")
+    }
+
+    func test_F3_computeFileHash_sameName_differentBytes_differentHash() {
+        let h1 = Clipboard.computeFileHash(name: "image.png", bytes: Self.red8x8PNG)
+        let h2 = Clipboard.computeFileHash(name: "image.png", bytes: Data([0xFF, 0xD8, 0xFF])) // not red8x8
+        XCTAssertNotEqual(h1, h2, "content bytes must bind into the §4.2 hash")
+    }
+
+    func test_F4_computeFileHash_pathComponents_strippedToBasename() {
+        let bytes = Self.red8x8PNG
+        let h1 = Clipboard.computeFileHash(name: "a/b/c.png", bytes: bytes)
+        let h2 = Clipboard.computeFileHash(name: "c.png", bytes: bytes)
+        XCTAssertEqual(h1, h2, "path prefix must be stripped — only basename matters")
+    }
+
+    func test_F5_publishImage_producesCorrectShape() {
+        let bytes = Self.red8x8PNG
+        let (clip, _) = Clipboard.publishImage(bytes: bytes, ext: "png")
+        XCTAssertEqual(clip.type, .image)
+        XCTAssertTrue(clip.hasData)
+        XCTAssertEqual(clip.dataName, "image.png")
+        XCTAssertEqual(clip.text, "image.png", "non-text text-field must be the basename per §3.3")
+        XCTAssertEqual(clip.size, bytes.count)
+        XCTAssertEqual(clip.hash, Clipboard.computeFileHash(name: "image.png", bytes: bytes))
+    }
+
+    /// Bytes-preservation discipline. `publishImage` must NOT re-encode
+    /// the input — the payload returned must equal the bytes given. If
+    /// this ever fails, the §4.2 hash on the wire won't match what
+    /// downstream readers compute, and image sync silently breaks.
+    func test_F6_publishImage_payload_isByteIdenticalToInput() {
+        let (_, payload) = Clipboard.publishImage(bytes: Self.red8x8PNG, ext: "png")
+        XCTAssertEqual(payload, Self.red8x8PNG)
     }
 }

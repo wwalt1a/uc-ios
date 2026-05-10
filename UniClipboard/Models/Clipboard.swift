@@ -82,11 +82,29 @@ public extension Clipboard {
         sha256Upper(Data(text.utf8))
     }
 
-    /// §4.2 — SHA-256 of raw bytes, uppercase hex. Used to verify image,
-    /// file, and text-overflow payloads on download. Group ZIP hashing
-    /// (§4.3) is a different algorithm and not covered here.
+    /// SHA-256 of raw bytes, uppercase hex. The §4.1 (text-overflow) hash
+    /// is `computeBytesHash(Data(text.utf8))`; §4.2 (image/file) needs the
+    /// `computeFileHash` two-step below.
     static func computeBytesHash(_ data: Data) -> String {
         sha256Upper(data)
+    }
+
+    /// §4.2 — file/image content hash. Binds the basename of `name` and
+    /// the bytes, so renaming a file (without changing its content)
+    /// produces a different hash. `name` is treated as a path; only the
+    /// last `/`-delimited segment matters. Used by both the image push
+    /// path (publish-side) and the image/file download verifier.
+    static func computeFileHash(name: String, bytes: Data) -> String {
+        let combined = "\(basename(name))|\(sha256Upper(bytes))"
+        return sha256Upper(Data(combined.utf8))
+    }
+
+    /// Strip path components, keep the final segment (extension included).
+    /// Bytewise — does not percent-decode or normalize like
+    /// `URL.lastPathComponent`. `"a/b/c.png"` → `"c.png"`.
+    private static func basename(_ name: String) -> String {
+        guard let lastSlash = name.lastIndex(of: "/") else { return name }
+        return String(name[name.index(after: lastSlash)...])
     }
 
     private static func sha256Upper(_ data: Data) -> String {
@@ -117,6 +135,25 @@ public extension Clipboard {
     /// `text.count` (grapheme clusters) is used for the threshold.
     /// Other clients (Flutter / C#) may use UTF-16 code units; the two
     /// agree for ASCII and BMP content. Documented interop ambiguity.
+    /// §3.3 + §4.2 — produce the publishable Clipboard + payload bytes
+    /// for raw image bytes of a known extension. `dataName` and `text`
+    /// are both `"image.<ext>"` (spec §3.3 says non-text `text` = label
+    /// = `basename(dataName)`); `hash` binds that basename and the bytes
+    /// per §4.2; `size` is the byte length. Image is always
+    /// `hasData=true`.
+    static func publishImage(bytes: Data, ext: String) -> (clipboard: Clipboard, payload: Data) {
+        let dataName = "image.\(ext)"
+        let entry = Clipboard(
+            type: .image,
+            hash: computeFileHash(name: dataName, bytes: bytes),
+            text: dataName,
+            hasData: true,
+            dataName: dataName,
+            size: bytes.count
+        )
+        return (entry, bytes)
+    }
+
     static func publishText(_ text: String) -> (clipboard: Clipboard, payload: Data?) {
         let threshold = 10_240
         let hash = computeTextHash(text)

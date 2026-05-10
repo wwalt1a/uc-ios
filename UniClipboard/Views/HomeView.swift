@@ -163,13 +163,17 @@ private struct ServerSnapshotCard: View {
     let onApply: () -> Void
     let onSave: () -> Void
 
-    /// Apply means "write to device pasteboard". Both inline and overflow
-    /// text variants work — overflow downloads the §2.4 payload first.
-    /// Image/file/group entries need UTI handling that pairs with the
-    /// image-push cycle; out of scope here.
+    /// Apply means "write to device pasteboard". Text (inline + overflow)
+    /// and image (download + UTI write) supported. File/Group stay
+    /// disabled — file bytes have no meaningful UIPasteboard target;
+    /// group needs §4.3.
     private var canApply: Bool {
         guard let e = entry else { return false }
-        return e.type == .text
+        switch e.type {
+        case .text:           return true
+        case .image:          return e.hasData
+        case .file, .group:   return false
+        }
     }
 
     /// Save means "write the payload to Documents". Image and file are
@@ -363,17 +367,11 @@ private struct DeviceClipboardCard: View {
                             )
                     }
 
-                    Text(entry.text)
-                        .font(.callout)
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+                    previewBlock(entry: entry)
 
                     HStack(spacing: 10) {
                         if let size = entry.size {
-                            Label("\(size) 字符", systemImage: "character")
+                            Label(formatSize(size, kind: entry.type), systemImage: sizeIcon(for: entry.type))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -392,6 +390,45 @@ private struct DeviceClipboardCard: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func previewBlock(entry: Clipboard) -> some View {
+        switch entry.type {
+        case .text:
+            Text(entry.text)
+                .font(.callout)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+        case .image, .file, .group:
+            HStack(spacing: 14) {
+                ClipboardKindBadge(kind: entry.type, size: .large, showsLabel: false)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.text)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    if let dataName = entry.dataName, dataName != entry.text {
+                        Text(dataName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .padding(14)
+            .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private func sizeIcon(for kind: Clipboard.Kind) -> String {
+        switch kind {
+        case .text:                  return "character"
+        case .image, .file, .group:  return "ruler"
         }
     }
 }
