@@ -259,6 +259,9 @@ final class FixturesTests: XCTestCase {
         XCTAssertEqual(try keys(re), [
             "trustInsecureCert", "autoCheckUpdate", "manualUploadDialogShown",
             "downloadRelativePath", "logViewLevelFilter",
+            // Cycle 9 — auto-sync engine. Always encoded (Bool, no nil
+            // semantics); fixture omits it and decode falls back to true.
+            "autoApplyServerChanges",
         ])
     }
 

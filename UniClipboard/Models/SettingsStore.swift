@@ -62,4 +62,22 @@ public final class SettingsStore: @unchecked Sendable {
         guard let data = try? encoder.encode(settings) else { return }
         defaults.set(data, forKey: AppSettings.PersistenceKey.appSettings)
     }
+
+    // MARK: - Last-synced content hash (cycle 9)
+
+    /// Load the most-recent content hash the sync engine confirmed both
+    /// sides shared. `nil` on first launch or after the engine resets.
+    public func loadLastSyncedHash() -> String? {
+        defaults.string(forKey: AppSettings.PersistenceKey.lastSyncedContentHash)
+    }
+
+    /// Persist the latest synced-content hash. Pass `nil` to clear it (e.g.
+    /// when the user switches active server).
+    public func saveLastSyncedHash(_ hash: String?) {
+        if let hash {
+            defaults.set(hash, forKey: AppSettings.PersistenceKey.lastSyncedContentHash)
+        } else {
+            defaults.removeObject(forKey: AppSettings.PersistenceKey.lastSyncedContentHash)
+        }
+    }
 }

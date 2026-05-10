@@ -12,7 +12,10 @@ import Observation
 @Observable
 final class AppViewModel {
     var servers: ServerConfigList {
-        didSet { store.saveServers(servers) }
+        didSet {
+            store.saveServers(servers)
+            engine?.handleServersChange(from: oldValue, to: servers)
+        }
     }
 
     var appSettings: AppSettings {
@@ -76,6 +79,14 @@ final class AppViewModel {
     @ObservationIgnored
     private let pasteboard: DevicePasteboardObserver
 
+    /// Auto-sync engine. Constructed during init, started/stopped by the
+    /// view layer (`ContentView` watches `scenePhase`). Implicitly
+    /// unwrapped because `SyncEngine.init` needs a fully-initialized
+    /// `AppViewModel` reference, which only exists after all other stored
+    /// properties are assigned.
+    @ObservationIgnored
+    private(set) var engine: SyncEngine!
+
     /// - Parameters:
     ///   - store: persistence backend; default uses `UserDefaults.standard`.
     ///   - forceFreshServers: when true, ignore stored servers and start
@@ -95,6 +106,7 @@ final class AppViewModel {
         self.pasteboard = pasteboard ?? DevicePasteboardObserver()
         self.servers = forceFreshServers ? ServerConfigList() : store.loadServers()
         self.appSettings = store.loadAppSettings()
+        self.engine = SyncEngine(viewModel: self, store: store)
     }
 
     /// Re-read the device pasteboard. Triggered by toolbar refresh and

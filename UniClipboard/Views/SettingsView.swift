@@ -22,7 +22,18 @@ struct SettingsView: View {
                 }
             }
 
-            Section("行为") {
+            Section {
+                Toggle(isOn: $vm.appSettings.autoApplyServerChanges) {
+                    Label("自动写入本机剪贴板", systemImage: "doc.on.clipboard")
+                }
+            } header: {
+                Text("行为")
+            } footer: {
+                Text("开启后，服务器有新内容时会立即覆盖本机剪贴板；关闭则只在主页高亮提示，不修改剪贴板。")
+                    .font(.caption)
+            }
+
+            Section {
                 Toggle(isOn: $vm.appSettings.autoCheckUpdate) {
                     Label("启动时检查更新", systemImage: "arrow.triangle.2.circlepath")
                 }

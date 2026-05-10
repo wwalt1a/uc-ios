@@ -1,12 +1,28 @@
 {
   "sourceLanguage" : "zh-Hans",
-  "version" : "1.0",
   "strings" : {
+    "·" : {
+
+    },
+    "（未命名）" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(Unnamed)"
+          }
+        }
+      }
+    },
     "%lld 个" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "%lld total" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld total"
+          }
         }
       }
     },
@@ -14,7 +30,10 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "%lld characters" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld characters"
+          }
         }
       }
     },
@@ -22,18 +41,33 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "%lld characters" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld characters"
+          }
         }
       }
+    },
+    "https://your-server.com:5033/" : {
+
+    },
+    "INFO" : {
+
     },
     "Pulled clipboard from server (%lld min ago)" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Pulled clipboard from server (%lld min ago)" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pulled clipboard from server (%lld min ago)"
+          }
         },
         "zh-Hans" : {
-          "stringUnit" : { "state" : "translated", "value" : "已从服务器拉取（%lld 分钟前）" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已从服务器拉取（%lld 分钟前）"
+          }
         }
       }
     },
@@ -45,7 +79,10 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Last pushed %@" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last pushed %@"
+          }
         }
       }
     },
@@ -53,7 +90,10 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Download Subdirectory" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Subdirectory"
+          }
         }
       }
     },
@@ -61,15 +101,10 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Download Path" }
-        }
-      }
-    },
-    "（未命名）" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "(Unnamed)" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Path"
+          }
         }
       }
     },
@@ -81,7 +116,10 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Cached on this device only. The server keeps just the latest item." }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cached on this device only. The server keeps just the latest item."
+          }
         }
       }
     },
@@ -89,7 +127,10 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Push your first item from the bar below." }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Push your first item from the bar below."
+          }
         }
       }
     },
@@ -97,7 +138,10 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Import from File" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import from File"
+          }
         }
       }
     },
@@ -105,563 +149,10 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Save" }
-        }
-      }
-    },
-    "允许不安全证书" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Trust Insecure Certificate" }
-        }
-      }
-    },
-    "关于" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "About" }
-        }
-      }
-    },
-    "其他" : {
-      "extractionState" : "manual",
-      "shouldTranslate" : false
-    },
-    "剪贴板" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Clipboard" }
-        }
-      }
-    },
-    "协议" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Protocol" }
-        }
-      }
-    },
-    "历史" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "History" }
-        }
-      }
-    },
-    "图片" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Image" }
-        }
-      }
-    },
-    "基本" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Basics" }
-        }
-      }
-    },
-    "归档" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Archive" }
-        }
-      }
-    },
-    "应用" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Apply" }
-        }
-      }
-    },
-    "应用到本机" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Apply to Device" }
-        }
-      }
-    },
-    "已同步" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Synced" }
-        }
-      }
-    },
-    "忽略的版本" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Ignored Version" }
-        }
-      }
-    },
-    "测试连接" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Test Connection" }
-        }
-      }
-    },
-    "无" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "None" }
-        }
-      }
-    },
-    "无法读取本机剪贴板" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Unable to read device clipboard." }
-        }
-      }
-    },
-    "日志" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Logs" }
-        }
-      }
-    },
-    "最近 %lld 条" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Last %lld items" }
-        }
-      }
-    },
-    "服务器" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Server" }
-        }
-      }
-    },
-    "服务器列表" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Servers" }
-        }
-      }
-    },
-    "服务器还没有发布过剪贴板" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "The server hasn't published anything yet." }
-        }
-      }
-    },
-    "本机" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Device" }
-        }
-      }
-    },
-    "本机与服务器一致" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Device matches server." }
-        }
-      }
-    },
-    "本机与服务器不一致 · 可推送" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Device differs from server · ready to push." }
-        }
-      }
-    },
-    "未配置" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Not configured" }
-        }
-      }
-    },
-    "管理服务器" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Manage Servers" }
-        }
-      }
-    },
-    "用户名" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Username" }
-        }
-      }
-    },
-    "添加服务器" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Add Server" }
-        }
-      }
-    },
-    "清除" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Clear" }
-        }
-      }
-    },
-    "版本" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Version" }
-        }
-      }
-    },
-    "推送当前剪贴板" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Push Current Clipboard" }
-        }
-      }
-    },
-    "文件" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "File" }
-        }
-      }
-    },
-    "文本" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Text" }
-        }
-      }
-    },
-    "删除" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Delete" }
-        }
-      }
-    },
-    "默认" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Default" }
-        }
-      }
-    },
-    "密码" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Password" }
-        }
-      }
-    },
-    "同步" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Sync" }
-        }
-      }
-    },
-    "启动时检查更新" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Check for updates at launch" }
-        }
-      }
-    },
-    "名称" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Name" }
-        }
-      }
-    },
-    "自动切换" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Auto-switch" }
-        }
-      }
-    },
-    "自动切换：连接到匹配 SSID 时自动切换到该服务器。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Auto-switch: when connected to a matching SSID, that server becomes active automatically." }
-        }
-      }
-    },
-    "行为" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Behavior" }
-        }
-      }
-    },
-    "设为活动" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Set Active" }
-        }
-      }
-    },
-    "设置" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Settings" }
-        }
-      }
-    },
-    "诊断" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Diagnostics" }
-        }
-      }
-    },
-    "和其他设备共享剪贴板" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Share Clipboard with Other Devices" }
-        }
-      }
-    },
-    "通过 UniClipboard 服务器同步" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Synced through your UniClipboard server" }
-        }
-      }
-    },
-    "开始配置" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Get Started" }
-        }
-      }
-    },
-    "我还没有服务器" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "I don't have a server" }
-        }
-      }
-    },
-    "服务器配置" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Server Configuration" }
-        }
-      }
-    },
-    "服务器地址" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Server Address" }
-        }
-      }
-    },
-    "局域网或自签名证书时勾选" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Enable for LAN or self-signed certificates" }
-        }
-      }
-    },
-    "凭据" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Credentials" }
-        }
-      }
-    },
-    "连接" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Connection" }
-        }
-      }
-    },
-    "正在连接…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Connecting…" }
-        }
-      }
-    },
-    "继续" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Continue" }
-        }
-      }
-    },
-    "已连接 — 服务器可达" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Connected — server is reachable" }
-        }
-      }
-    },
-    "认证失败 — 检查用户名和密码" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Authentication failed — check username and password" }
-        }
-      }
-    },
-    "无法连接 — 检查 URL 和网络" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Unable to connect — check URL and network" }
-        }
-      }
-    },
-    "请填写 URL、用户名和密码" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Fill in URL, username, and password" }
-        }
-      }
-    },
-    "自动切换 WiFi" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Auto-switch on WiFi" }
-        }
-      }
-    },
-    "在指定 WiFi 下自动启用此服务器（可选）。\n稍后也可以在「设置 → 服务器列表」修改。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Optionally activate this server on specific networks. You can change this later in Settings → Servers." }
-        }
-      }
-    },
-    "当前网络" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Current Network" }
-        }
-      }
-    },
-    "添加" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Add" }
-        }
-      }
-    },
-    "已添加" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Added" }
-        }
-      }
-    },
-    "已添加的 WiFi" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Added WiFi Networks" }
-        }
-      }
-    },
-    "完成" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Done" }
-        }
-      }
-    },
-    "稍后设置" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Set Up Later" }
-        }
-      }
-    },
-    "兼容 SyncClipboard v1" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "SyncClipboard v1 compatible" }
-        }
-      }
-    },
-    "应用失败:" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Apply failed:" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save"
+          }
         }
       }
     },
@@ -669,31 +160,47 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Save failed:" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save failed:"
+          }
         }
       }
     },
-    "正在应用…" : {
+    "允许不安全证书" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Applying…" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trust Insecure Certificate"
+          }
         }
       }
     },
-    "正在保存…" : {
+    "关于" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Saving…" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About"
+          }
         }
       }
     },
-    "已保存到 %@" : {
+    "其他" : {
+      "extractionState" : "manual",
+      "shouldTranslate" : false
+    },
+    "兼容 SyncClipboard v1" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Saved to %@" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SyncClipboard v1 compatible"
+          }
         }
       }
     },
@@ -701,9 +208,808 @@
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
-          "stringUnit" : { "state" : "translated", "value" : "Hash mismatch — file may be corrupted" }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hash mismatch — file may be corrupted"
+          }
+        }
+      }
+    },
+    "最近 %lld 条" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last %lld items"
+          }
+        }
+      }
+    },
+    "凭据" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credentials"
+          }
+        }
+      }
+    },
+    "删除" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete"
+          }
+        }
+      }
+    },
+    "剪贴板" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clipboard"
+          }
+        }
+      }
+    },
+    "协议" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Protocol"
+          }
+        }
+      }
+    },
+    "历史" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "History"
+          }
+        }
+      }
+    },
+    "同步" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync"
+          }
+        }
+      }
+    },
+    "名称" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        }
+      }
+    },
+    "启动时检查更新" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check for updates at launch"
+          }
+        }
+      }
+    },
+    "和其他设备共享剪贴板" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share Clipboard with Other Devices"
+          }
+        }
+      }
+    },
+    "图片" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Image"
+          }
+        }
+      }
+    },
+    "在指定 WiFi 下自动启用此服务器（可选）。\n稍后也可以在「设置 → 服务器列表」修改。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optionally activate this server on specific networks. You can change this later in Settings → Servers."
+          }
+        }
+      }
+    },
+    "基本" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basics"
+          }
+        }
+      }
+    },
+    "完成" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        }
+      }
+    },
+    "密码" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Password"
+          }
+        }
+      }
+    },
+    "局域网或自签名证书时勾选" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable for LAN or self-signed certificates"
+          }
+        }
+      }
+    },
+    "已保存到 %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved to %@"
+          }
+        }
+      }
+    },
+    "已同步" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synced"
+          }
+        }
+      }
+    },
+    "已添加" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Added"
+          }
+        }
+      }
+    },
+    "已添加的 WiFi" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Added WiFi Networks"
+          }
+        }
+      }
+    },
+    "已连接 — 服务器可达" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected — server is reachable"
+          }
+        }
+      }
+    },
+    "应用" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply"
+          }
+        }
+      }
+    },
+    "应用到本机" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply to Device"
+          }
+        }
+      }
+    },
+    "应用失败:" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply failed:"
+          }
+        }
+      }
+    },
+    "开始配置" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get Started"
+          }
+        }
+      }
+    },
+    "归档" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Archive"
+          }
+        }
+      }
+    },
+    "当前网络" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current Network"
+          }
+        }
+      }
+    },
+    "忽略的版本" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ignored Version"
+          }
+        }
+      }
+    },
+    "我还没有服务器" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I don't have a server"
+          }
+        }
+      }
+    },
+    "接收超时 — 请稍后重试" : {
+
+    },
+    "推送失败:" : {
+
+    },
+    "推送当前剪贴板" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Push Current Clipboard"
+          }
+        }
+      }
+    },
+    "文件" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File"
+          }
+        }
+      }
+    },
+    "文本" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text"
+          }
+        }
+      }
+    },
+    "无" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None"
+          }
+        }
+      }
+    },
+    "无法读取本机剪贴板" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to read device clipboard."
+          }
+        }
+      }
+    },
+    "无法连接 — 检查 URL 和网络" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to connect — check URL and network"
+          }
+        }
+      }
+    },
+    "无法连接 — 请检查网络和 URL" : {
+
+    },
+    "日志" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logs"
+          }
+        }
+      }
+    },
+    "服务器" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server"
+          }
+        }
+      }
+    },
+    "服务器列表" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Servers"
+          }
+        }
+      }
+    },
+    "服务器地址" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server Address"
+          }
+        }
+      }
+    },
+    "服务器地址无效" : {
+
+    },
+    "服务器尚未发布剪贴板" : {
+
+    },
+    "服务器返回 HTTP %lld" : {
+
+    },
+    "服务器返回的数据无法解析" : {
+
+    },
+    "服务器还没有发布过剪贴板" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server hasn't published anything yet."
+          }
+        }
+      }
+    },
+    "服务器配置" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server Configuration"
+          }
+        }
+      }
+    },
+    "服务器错误 %lld" : {
+
+    },
+    "未配置" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not configured"
+          }
+        }
+      }
+    },
+    "本机" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device"
+          }
+        }
+      }
+    },
+    "本机与服务器一致" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device matches server."
+          }
+        }
+      }
+    },
+    "本机与服务器不一致 · 可推送" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device differs from server · ready to push."
+          }
+        }
+      }
+    },
+    "本机剪贴板为空" : {
+
+    },
+    "正在保存…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving…"
+          }
+        }
+      }
+    },
+    "正在应用…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applying…"
+          }
+        }
+      }
+    },
+    "正在推送…" : {
+
+    },
+    "正在连接…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecting…"
+          }
+        }
+      }
+    },
+    "测试连接" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test Connection"
+          }
+        }
+      }
+    },
+    "添加" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add"
+          }
+        }
+      }
+    },
+    "添加服务器" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Server"
+          }
+        }
+      }
+    },
+    "清除" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear"
+          }
+        }
+      }
+    },
+    "版本" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version"
+          }
+        }
+      }
+    },
+    "用户名" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Username"
+          }
+        }
+      }
+    },
+    "稍后设置" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Up Later"
+          }
+        }
+      }
+    },
+    "管理服务器" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage Servers"
+          }
+        }
+      }
+    },
+    "继续" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue"
+          }
+        }
+      }
+    },
+    "自动切换" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-switch"
+          }
+        }
+      }
+    },
+    "自动切换 WiFi" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-switch on WiFi"
+          }
+        }
+      }
+    },
+    "自动切换：连接到匹配 SSID 时自动切换到该服务器。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-switch: when connected to a matching SSID, that server becomes active automatically."
+          }
+        }
+      }
+    },
+    "行为" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behavior"
+          }
+        }
+      }
+    },
+    "认证失败 — 检查用户名和密码" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Authentication failed — check username and password"
+          }
+        }
+      }
+    },
+    "认证失败 — 请检查用户名和密码" : {
+
+    },
+    "设为活动" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Active"
+          }
+        }
+      }
+    },
+    "设置" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings"
+          }
+        }
+      }
+    },
+    "诊断" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics"
+          }
+        }
+      }
+    },
+    "请填写 URL、用户名和密码" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill in URL, username, and password"
+          }
+        }
+      }
+    },
+    "连接" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connection"
+          }
+        }
+      }
+    },
+    "连接超时 — 请检查服务器地址" : {
+
+    },
+    "通过 UniClipboard 服务器同步" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synced through your UniClipboard server"
+          }
+        }
+      }
+    },
+    "默认" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default"
+          }
         }
       }
     }
-  }
+  },
+  "version" : "1.0"
 }

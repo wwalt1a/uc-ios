@@ -5,6 +5,8 @@ struct ContentView: View {
 
     @State private var selection: Int = Self.initialTab
 
+    @Environment(\.scenePhase) private var scenePhase
+
     private static var initialTab: Int {
         guard let i = ProcessInfo.processInfo.environment["UC_INIT_TAB"].flatMap(Int.init) else {
             return 0
@@ -28,21 +30,6 @@ struct ContentView: View {
             Tab("剪贴板", systemImage: "doc.on.clipboard.fill", value: 0) {
                 NavigationStack {
                     HomeView(vm: vm)
-                        .task {
-                            await vm.refresh()
-                            // DEBUG hooks for simctl regression — see CLAUDE.md.
-                            // Not feature flags; remove on ship.
-                            let env = ProcessInfo.processInfo.environment
-                            if env["UC_AUTO_PUSH"] == "1" {
-                                await vm.push()
-                            }
-                            if env["UC_AUTO_APPLY"] == "1" {
-                                await vm.applyServerToDevice()
-                            }
-                            if env["UC_AUTO_SAVE"] == "1" {
-                                await vm.saveServerAttachment()
-                            }
-                        }
                 }
             }
             Tab("历史", systemImage: "clock.fill", value: 1) {
@@ -57,6 +44,30 @@ struct ContentView: View {
             }
         }
         .tint(.indigo)
+        .task {
+            vm.engine.start()
+            // simctl regression hooks — not feature flags. The engine
+            // already handles push/apply automatically via the 1Hz loop;
+            // these just kick off an immediate first tick so test recipes
+            // don't have to wait the full cadence before screenshotting.
+            // UC_AUTO_SAVE stays a direct call: saving to Documents is a
+            // discrete user action, not part of the auto-sync loop.
+            let env = ProcessInfo.processInfo.environment
+            if env["UC_AUTO_PUSH"] == "1" || env["UC_AUTO_APPLY"] == "1" {
+                vm.engine.forceTickNow()
+            }
+            if env["UC_AUTO_SAVE"] == "1" {
+                await vm.saveServerAttachment()
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .active:     vm.engine.start()
+            case .background: vm.engine.stop()
+            case .inactive:   break  // brief — Notification Center pull-down etc; keep ticking
+            @unknown default: break
+            }
+        }
     }
 }
 

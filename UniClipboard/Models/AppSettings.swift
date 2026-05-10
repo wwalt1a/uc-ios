@@ -10,6 +10,12 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
     public var downloadRelativePath: String
     public var logViewLevelFilter: String
     public var ignoredVersion: String?
+    /// When true, the sync engine writes new server-side content directly
+    /// to `UIPasteboard.general`. When false, new server content is staged
+    /// in the UI (highlighted card, expanded preview) but not written.
+    /// Default true: tracks the "auto sync" semantics introduced in
+    /// cycle 9 — users shouldn't have to think about upload/download.
+    public var autoApplyServerChanges: Bool
 
     public static let defaults = AppSettings(
         trustInsecureCert: false,
@@ -17,7 +23,8 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         manualUploadDialogShown: false,
         downloadRelativePath: "",
         logViewLevelFilter: "info",
-        ignoredVersion: nil
+        ignoredVersion: nil,
+        autoApplyServerChanges: true
     )
 
     public init(
@@ -26,7 +33,8 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         manualUploadDialogShown: Bool = false,
         downloadRelativePath: String = "",
         logViewLevelFilter: String = "info",
-        ignoredVersion: String? = nil
+        ignoredVersion: String? = nil,
+        autoApplyServerChanges: Bool = true
     ) {
         self.trustInsecureCert = trustInsecureCert
         self.autoCheckUpdate = autoCheckUpdate
@@ -34,11 +42,13 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         self.downloadRelativePath = downloadRelativePath
         self.logViewLevelFilter = logViewLevelFilter
         self.ignoredVersion = ignoredVersion
+        self.autoApplyServerChanges = autoApplyServerChanges
     }
 
     private enum CodingKeys: String, CodingKey {
         case trustInsecureCert, autoCheckUpdate, manualUploadDialogShown
         case downloadRelativePath, logViewLevelFilter, ignoredVersion
+        case autoApplyServerChanges
     }
 
     public init(from decoder: any Decoder) throws {
@@ -50,6 +60,7 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         downloadRelativePath    = try c.decodeIfPresent(String.self, forKey: .downloadRelativePath)    ?? d.downloadRelativePath
         logViewLevelFilter      = try c.decodeIfPresent(String.self, forKey: .logViewLevelFilter)      ?? d.logViewLevelFilter
         ignoredVersion          = try c.decodeIfPresent(String.self, forKey: .ignoredVersion)
+        autoApplyServerChanges  = try c.decodeIfPresent(Bool.self,   forKey: .autoApplyServerChanges)  ?? d.autoApplyServerChanges
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -60,6 +71,7 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         try c.encode(downloadRelativePath,    forKey: .downloadRelativePath)
         try c.encode(logViewLevelFilter,      forKey: .logViewLevelFilter)
         try c.encodeIfPresent(ignoredVersion, forKey: .ignoredVersion)
+        try c.encode(autoApplyServerChanges,  forKey: .autoApplyServerChanges)
     }
 }
 
@@ -69,5 +81,9 @@ public extension AppSettings {
         public static let serverConfigList = "server_config_list"
         public static let appSettings      = "app_settings"
         public static let legacyServerConfig = "server_config"
+        /// Cycle 9 — runtime sync state. The most recent content hash that
+        /// the engine confirmed both sides shared. NOT a user setting; lives
+        /// outside `app_settings` so it can be cleared without touching prefs.
+        public static let lastSyncedContentHash = "last_synced_content_hash"
     }
 }
