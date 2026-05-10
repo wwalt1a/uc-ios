@@ -197,7 +197,7 @@ final class DevicePasteboardObserver {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.read() }
+                Task { @MainActor [weak self] in self?.read() }
             }
         )
         observers.append(
@@ -206,7 +206,7 @@ final class DevicePasteboardObserver {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.read() }
+                Task { @MainActor [weak self] in self?.read() }
             }
         )
     }

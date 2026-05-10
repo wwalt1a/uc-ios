@@ -95,13 +95,14 @@ final class AppViewModel {
     ///   - pasteboard: device pasteboard observer; default reads
     ///     `UIPasteboard.general` (or honors `UC_DEVICE_TEXT` env hook).
     init(
-        store: SettingsStore = SettingsStore(),
+        store: SettingsStore? = nil,
         forceFreshServers: Bool = ProcessInfo.processInfo.environment["UC_FRESH"] == "1",
         pasteboard: DevicePasteboardObserver? = nil
     ) {
-        // `DevicePasteboardObserver` is `@MainActor`, so its default value
-        // must be constructed inside the init body — default-argument
-        // expressions are evaluated in a nonisolated context.
+        // MainActor-isolated defaults (SettingsStore.init, DevicePasteboardObserver)
+        // must be built in the init body — default-argument expressions are
+        // evaluated in a nonisolated context.
+        let store = store ?? SettingsStore()
         self.store = store
         self.pasteboard = pasteboard ?? DevicePasteboardObserver()
         self.servers = forceFreshServers ? ServerConfigList() : store.loadServers()
@@ -344,14 +345,18 @@ extension AppViewModel {
     /// pass a string to seed `vm.deviceClipboard` without touching the
     /// real `UIPasteboard.general`.
     static func preview(
-        servers: ServerConfigList = Mock.servers,
-        appSettings: AppSettings = AppSettings(
+        servers: ServerConfigList? = nil,
+        appSettings: AppSettings? = nil,
+        deviceText: String? = nil
+    ) -> AppViewModel {
+        // MainActor-isolated defaults (Mock.servers, AppSettings.init) must be
+        // resolved in the body — default-argument expressions are nonisolated.
+        let servers = servers ?? Mock.servers
+        let appSettings = appSettings ?? AppSettings(
             manualUploadDialogShown: true,
             downloadRelativePath: "SyncClipboard/Inbox",
             ignoredVersion: "0.3.2"
-        ),
-        deviceText: String? = nil
-    ) -> AppViewModel {
+        )
         let suite = UserDefaults(suiteName: "AppViewModel.preview-\(UUID().uuidString)")!
         let store = SettingsStore(defaults: suite)
         store.saveServers(servers)
