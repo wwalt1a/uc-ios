@@ -87,6 +87,12 @@ final class AppViewModel {
     @ObservationIgnored
     private(set) var engine: SyncEngine!
 
+    /// Reads the current Wi-Fi SSID via `CNCopyCurrentNetworkInfo`. Owned
+    /// at the app-VM layer so the same instance backs the SSID editor
+    /// (Settings → Servers) and the SetupFlow auto-switch step.
+    /// Observable — views bind directly to `authState` / `currentSSID`.
+    let ssidProvider: CurrentSSIDProvider
+
     /// - Parameters:
     ///   - store: persistence backend; default uses `UserDefaults.standard`.
     ///   - forceFreshServers: when true, ignore stored servers and start
@@ -107,7 +113,38 @@ final class AppViewModel {
         self.pasteboard = pasteboard ?? DevicePasteboardObserver()
         self.servers = forceFreshServers ? ServerConfigList() : store.loadServers()
         self.appSettings = store.loadAppSettings()
+        self.ssidProvider = CurrentSSIDProvider()
         self.engine = SyncEngine(viewModel: self, store: store)
+        // Drive engine state resets when a Wi-Fi flip changes the
+        // effective server (§5.3). Captured weakly because the provider
+        // outlives the engine reference inside `self`.
+        self.ssidProvider.onSSIDChanged = { [weak self] _ in
+            self?.handleSSIDChanged()
+        }
+    }
+
+    /// Effective active server per §5.3 — auto-switches to a configured
+    /// server when the current SSID matches its `autoSwitchWifiNames`,
+    /// falling back to the user-chosen default (`activeConfigId`) when
+    /// no SSID match exists or Wi-Fi info is unavailable.
+    var effectiveActiveConfig: ServerConfig? {
+        servers.resolveActiveConfig(currentSsid: ssidProvider.currentSSID)
+    }
+
+    /// Whether the effective server differs from the user-chosen default —
+    /// i.e., the current SSID forced an auto-switch override. Views use
+    /// this to surface a badge so the difference doesn't feel like a bug.
+    var isAutoSwitchOverridden: Bool {
+        guard let effective = effectiveActiveConfig,
+              let default_ = servers.activeConfig else { return false }
+        return effective.id != default_.id
+    }
+
+    /// Hook fired by `CurrentSSIDProvider.onSSIDChanged`. Resets engine
+    /// runtime state only if the effective server changed — otherwise a
+    /// roaming network blip would discard a perfectly good cached hash.
+    private func handleSSIDChanged() {
+        engine?.handleEffectiveActiveChange()
     }
 
     /// Re-read the device pasteboard. Triggered by toolbar refresh and
@@ -131,7 +168,7 @@ final class AppViewModel {
                 return
             }
             guard !isApplying else { return }
-            guard let server = servers.activeConfig, let dataName = entry.dataName else { return }
+            guard let server = effectiveActiveConfig, let dataName = entry.dataName else { return }
             isApplying = true
             defer { isApplying = false }
             do {
@@ -149,7 +186,7 @@ final class AppViewModel {
         case .image:
             guard entry.hasData,
                   let dataName = entry.dataName,
-                  let server = servers.activeConfig
+                  let server = effectiveActiveConfig
             else { return }
             guard !isApplying else { return }
             isApplying = true
@@ -181,7 +218,7 @@ final class AppViewModel {
               entry.hasData,
               entry.type == .image || entry.type == .file,
               let dataName = entry.dataName,
-              let server = servers.activeConfig
+              let server = effectiveActiveConfig
         else { return }
         isSaving = true
         defer { isSaving = false }
@@ -285,7 +322,7 @@ extension AppViewModel {
     ///   a follow-up GET.
     func push() async {
         guard !isPushing else { return }
-        guard let server = servers.activeConfig else { return }
+        guard let server = effectiveActiveConfig else { return }
         guard let snapshot = pasteboard.snapshot(),
               snapshot.clipboard.type == .text || snapshot.clipboard.type == .image
         else { return }
@@ -318,7 +355,7 @@ extension AppViewModel {
     ///   and surface via `refreshError`.
     /// - No active config → spec §5.2 forbids the call; returns silently.
     func refresh() async {
-        guard let server = servers.activeConfig else { return }
+        guard let server = effectiveActiveConfig else { return }
         if isRefreshing { return }
         isRefreshing = true
         defer { isRefreshing = false }

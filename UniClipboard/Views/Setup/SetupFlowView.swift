@@ -66,6 +66,7 @@ struct SetupFlowView: View {
                             username: username,
                             password: password,
                             servers: $vm.servers,
+                            ssidProvider: vm.ssidProvider,
                             onComplete: onComplete
                         )
                     }
@@ -160,6 +161,15 @@ private struct ServerFormStepView: View {
         case authFailed
         case unreachable
         case missingFields
+
+        init(_ result: ConnectionTester.Result) {
+            switch result {
+            case .success:        self = .success
+            case .authFailed:     self = .authFailed
+            case .unreachable:    self = .unreachable
+            case .missingFields:  self = .missingFields
+            }
+        }
     }
 
     var body: some View {
@@ -290,43 +300,21 @@ private struct ServerFormStepView: View {
     }
 
     private func runTest() async {
+        // Short-circuit missingFields before showing the spinner so the
+        // status label snaps to the hint without a brief "正在连接…" flash.
         let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedURL.isEmpty || username.isEmpty || password.isEmpty {
             test = .missingFields
             return
         }
         test = .connecting
-
-        let probe = ServerConfig(
-            id: "probe",
-            url: trimmedURL,
+        let result = await ConnectionTester.test(
+            url: url,
             username: username,
-            password: password
+            password: password,
+            trustInsecureCert: trustInsecure
         )
-        let client: SyncClipboardClient
-        do {
-            client = try SyncClipboardClient(server: probe, trustInsecureCert: trustInsecure)
-        } catch {
-            test = .unreachable
-            return
-        }
-        do {
-            _ = try await client.getClipboard()
-            test = .success
-        } catch let e as SyncError {
-            switch e.kind {
-            case .notFound:
-                // Spec §2.1: 404 means "no clipboard published yet" — server
-                // reachable + auth OK is what the user is testing.
-                test = .success
-            case .authFailed:
-                test = .authFailed
-            default:
-                test = .unreachable
-            }
-        } catch {
-            test = .unreachable
-        }
+        test = TestState(result)
     }
 }
 
@@ -338,11 +326,10 @@ private struct AutoSwitchStepView: View {
     let username: String
     let password: String
     @Binding var servers: ServerConfigList
+    @Bindable var ssidProvider: CurrentSSIDProvider
     var onComplete: () -> Void
 
     @State private var ssids: [String] = []
-
-    private let mockCurrentSSID = "Home-5G"
 
     var body: some View {
         Form {
@@ -354,20 +341,7 @@ private struct AutoSwitchStepView: View {
             }
 
             Section("当前网络") {
-                HStack {
-                    Image(systemName: "wifi")
-                        .foregroundStyle(.tint)
-                    Text(mockCurrentSSID)
-                    Spacer()
-                    if ssids.contains(mockCurrentSSID) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        Button("添加") { ssids.append(mockCurrentSSID) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                }
+                currentNetworkRow
             }
 
             Section("已添加的 WiFi") {
@@ -406,6 +380,75 @@ private struct AutoSwitchStepView: View {
         }
         .navigationTitle("自动切换 WiFi")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            ssidProvider.refresh()
+        }
+    }
+
+    @ViewBuilder
+    private var currentNetworkRow: some View {
+        switch ssidProvider.authState {
+        case .unavailable:
+            HStack {
+                Image(systemName: "wifi.exclamationmark")
+                    .foregroundStyle(.secondary)
+                Text("当前设备无法读取 WiFi 名称")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        case .notDetermined:
+            HStack {
+                Image(systemName: "location.circle")
+                    .foregroundStyle(.tint)
+                Text("授权位置以读取当前 WiFi")
+                Spacer()
+                Button("授权") { ssidProvider.requestAuthorization() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        case .denied:
+            HStack {
+                Image(systemName: "location.slash")
+                    .foregroundStyle(.orange)
+                Text("位置权限未授予")
+                    .font(.callout)
+                Spacer()
+                Button("打开设置") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        case .authorized:
+            HStack {
+                Image(systemName: "wifi")
+                    .foregroundStyle(.tint)
+                if let ssid = ssidProvider.currentSSID {
+                    Text(ssid)
+                    Spacer()
+                    if ssids.contains(ssid) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Button("添加") { ssids.append(ssid) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                } else {
+                    Text("未连接 WiFi")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        ssidProvider.refresh()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+        }
     }
 
     private func save() {

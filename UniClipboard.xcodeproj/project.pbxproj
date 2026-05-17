@@ -55,7 +55,7 @@
 				4D479E072FAEAE5B00B8F825 /* Sources */,
 				4D479E082FAEAE5B00B8F825 /* Frameworks */,
 				4D479E092FAEAE5B00B8F825 /* Resources */,
-				4D8A0E012FB1ABCD00C8F901 /* Patch Info.plist (UIFileSharingEnabled + ATS LAN + LocalNetworkUsage) */,
+				4D8A0E012FB1ABCD00C8F901 /* Patch Info.plist (UIFileSharingEnabled + ATS LAN + LocalNetworkUsage + CameraUsage + LocationUsage) */,
 			);
 			buildRules = (
 			);
@@ -117,7 +117,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		4D8A0E012FB1ABCD00C8F901 /* Patch Info.plist (UIFileSharingEnabled + ATS LAN + LocalNetworkUsage) */ = {
+		4D8A0E012FB1ABCD00C8F901 /* Patch Info.plist (UIFileSharingEnabled + ATS LAN + LocalNetworkUsage + CameraUsage + LocationUsage) */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -128,14 +128,14 @@
 			inputPaths = (
 				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
 			);
-			name = "Patch Info.plist (UIFileSharingEnabled + ATS LAN + LocalNetworkUsage)";
+			name = "Patch Info.plist (UIFileSharingEnabled + ATS LAN + LocalNetworkUsage + CameraUsage + LocationUsage)";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# After ProcessInfoPlistFile (declared as inputPaths), patch three keys:\n# 1. UIFileSharingEnabled — Xcode 26's processInfoPlistFile silently drops\n#    INFOPLIST_KEY_UIFileSharingEnabled (sibling LS* keys are honored, the\n#    bug is per-key). Files-app needs this to surface the Documents folder.\n# 2. NSAppTransportSecurity > NSAllowsLocalNetworking — nested dict, no\n#    INFOPLIST_KEY_* equivalent. Lets HTTP traffic go to RFC private IPs\n#    (10/8, 172.16/12, 192.168/16, .local) so the device can reach a server\n#    running on a LAN host. Public-internet HTTP stays blocked.\n# 3. NSLocalNetworkUsageDescription — iOS 14+ requires this string before\n#    the system surfaces the LAN permission prompt; without it, requests\n#    silently fail. zh-Hans copy (matches source language).\n# Sandbox is OFF for this target so PlistBuddy in-place writes persist.\n# Idempotent: Add then Set fallback. Verify all three after, fail loudly if\n# the COW overlay regression returns or a key disappears.\nset -e\nPLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nPB=/usr/libexec/PlistBuddy\nif [ ! -f \"$PLIST\" ]; then echo \"error: Info.plist not found at $PLIST\" >&2; exit 1; fi\n$PB -c \"Add :UIFileSharingEnabled bool true\" \"$PLIST\" 2>/dev/null || $PB -c \"Set :UIFileSharingEnabled true\" \"$PLIST\"\n$PB -c \"Add :NSAppTransportSecurity dict\" \"$PLIST\" 2>/dev/null || true\n$PB -c \"Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true\" \"$PLIST\" 2>/dev/null || $PB -c \"Set :NSAppTransportSecurity:NSAllowsLocalNetworking true\" \"$PLIST\"\nDESC=\"需要访问本地网络以连接你部署的剪贴板服务器\"\n$PB -c \"Add :NSLocalNetworkUsageDescription string $DESC\" \"$PLIST\" 2>/dev/null || $PB -c \"Set :NSLocalNetworkUsageDescription $DESC\" \"$PLIST\"\nA=$($PB -c \"Print :UIFileSharingEnabled\" \"$PLIST\" 2>/dev/null || true)\nB=$($PB -c \"Print :NSAppTransportSecurity:NSAllowsLocalNetworking\" \"$PLIST\" 2>/dev/null || true)\nC=$($PB -c \"Print :NSLocalNetworkUsageDescription\" \"$PLIST\" 2>/dev/null || true)\nif [ \"$A\" != \"true\" ]; then echo \"error: UIFileSharingEnabled persistence failed (got: '$A')\" >&2; exit 1; fi\nif [ \"$B\" != \"true\" ]; then echo \"error: NSAllowsLocalNetworking persistence failed (got: '$B')\" >&2; exit 1; fi\nif [ -z \"$C\" ]; then echo \"error: NSLocalNetworkUsageDescription persistence failed\" >&2; exit 1; fi\necho \"note: Info.plist hardened (UIFileSharingEnabled, NSAllowsLocalNetworking, NSLocalNetworkUsageDescription)\"\n";
+			shellScript = "# After ProcessInfoPlistFile (declared as inputPaths), patch five keys:\n# 1. UIFileSharingEnabled — Xcode 26's processInfoPlistFile silently drops\n#    INFOPLIST_KEY_UIFileSharingEnabled (sibling LS* keys are honored, the\n#    bug is per-key). Files-app needs this to surface the Documents folder.\n# 2. NSAppTransportSecurity > NSAllowsLocalNetworking — nested dict, no\n#    INFOPLIST_KEY_* equivalent. Lets HTTP traffic go to RFC private IPs\n#    (10/8, 172.16/12, 192.168/16, .local) so the device can reach a server\n#    running on a LAN host. Public-internet HTTP stays blocked.\n# 3. NSLocalNetworkUsageDescription — iOS 14+ requires this string before\n#    the system surfaces the LAN permission prompt; without it, requests\n#    silently fail. zh-Hans copy (matches source language).\n# 4. NSCameraUsageDescription — required to scan QR codes via VisionKit's\n#    DataScannerViewController in the Settings → Servers → Add flow.\n# 5. NSLocationWhenInUseUsageDescription — iOS 13+ gates CNCopyCurrentNetworkInfo\n#    behind Location When In Use auth. Without this string the prompt never\n#    appears and the SSID read silently returns nil.\n# Sandbox is OFF for this target so PlistBuddy in-place writes persist.\n# Idempotent: Add then Set fallback. Verify all five after, fail loudly if\n# the COW overlay regression returns or a key disappears.\nset -e\nPLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nPB=/usr/libexec/PlistBuddy\nif [ ! -f \"$PLIST\" ]; then echo \"error: Info.plist not found at $PLIST\" >&2; exit 1; fi\n$PB -c \"Add :UIFileSharingEnabled bool true\" \"$PLIST\" 2>/dev/null || $PB -c \"Set :UIFileSharingEnabled true\" \"$PLIST\"\n$PB -c \"Add :NSAppTransportSecurity dict\" \"$PLIST\" 2>/dev/null || true\n$PB -c \"Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true\" \"$PLIST\" 2>/dev/null || $PB -c \"Set :NSAppTransportSecurity:NSAllowsLocalNetworking true\" \"$PLIST\"\nDESC=\"需要访问本地网络以连接你部署的剪贴板服务器\"\n$PB -c \"Add :NSLocalNetworkUsageDescription string $DESC\" \"$PLIST\" 2>/dev/null || $PB -c \"Set :NSLocalNetworkUsageDescription $DESC\" \"$PLIST\"\nCAM=\"需要访问相机以扫描服务器配置二维码\"\n$PB -c \"Add :NSCameraUsageDescription string $CAM\" \"$PLIST\" 2>/dev/null || $PB -c \"Set :NSCameraUsageDescription $CAM\" \"$PLIST\"\nLOC=\"需要位置权限以读取当前 WiFi 名称,用于自动切换服务器\"\n$PB -c \"Add :NSLocationWhenInUseUsageDescription string $LOC\" \"$PLIST\" 2>/dev/null || $PB -c \"Set :NSLocationWhenInUseUsageDescription $LOC\" \"$PLIST\"\nA=$($PB -c \"Print :UIFileSharingEnabled\" \"$PLIST\" 2>/dev/null || true)\nB=$($PB -c \"Print :NSAppTransportSecurity:NSAllowsLocalNetworking\" \"$PLIST\" 2>/dev/null || true)\nC=$($PB -c \"Print :NSLocalNetworkUsageDescription\" \"$PLIST\" 2>/dev/null || true)\nD=$($PB -c \"Print :NSCameraUsageDescription\" \"$PLIST\" 2>/dev/null || true)\nE=$($PB -c \"Print :NSLocationWhenInUseUsageDescription\" \"$PLIST\" 2>/dev/null || true)\nif [ \"$A\" != \"true\" ]; then echo \"error: UIFileSharingEnabled persistence failed (got: '$A')\" >&2; exit 1; fi\nif [ \"$B\" != \"true\" ]; then echo \"error: NSAllowsLocalNetworking persistence failed (got: '$B')\" >&2; exit 1; fi\nif [ -z \"$C\" ]; then echo \"error: NSLocalNetworkUsageDescription persistence failed\" >&2; exit 1; fi\nif [ -z \"$D\" ]; then echo \"error: NSCameraUsageDescription persistence failed\" >&2; exit 1; fi\nif [ -z \"$E\" ]; then echo \"error: NSLocationWhenInUseUsageDescription persistence failed\" >&2; exit 1; fi\necho \"note: Info.plist hardened (UIFileSharingEnabled, NSAllowsLocalNetworking, NSLocalNetworkUsageDescription, NSCameraUsageDescription, NSLocationWhenInUseUsageDescription)\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -274,6 +274,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = UniClipboard/UniClipboard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8XG39X5CL8;
@@ -308,6 +309,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = UniClipboard/UniClipboard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8XG39X5CL8;

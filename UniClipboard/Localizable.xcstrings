@@ -15,6 +15,12 @@
         }
       }
     },
+    "「%@」是最后一台服务器。删除后将返回首次设置流程。" : {
+
+    },
+    "「%@」是当前活动服务器。删除后将自动切换到列表中剩余的服务器。" : {
+
+    },
     "%lld 个" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -134,6 +140,9 @@
         }
       }
     },
+    "从二维码填充" : {
+
+    },
     "从文件导入" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -141,6 +150,20 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Import from File"
+          }
+        }
+      }
+    },
+    "位置权限未授予" : {
+
+    },
+    "便于辨识的名称" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Friendly name"
           }
         }
       }
@@ -243,6 +266,20 @@
         }
       }
     },
+    "切换服务器" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch server"
+          }
+        }
+      }
+    },
+    "切换服务器 · 已根据 WiFi 自动切换" : {
+
+    },
     "删除" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -253,6 +290,9 @@
           }
         }
       }
+    },
+    "删除服务器" : {
+
     },
     "剪贴板" : {
       "extractionState" : "manual",
@@ -286,6 +326,12 @@
           }
         }
       }
+    },
+    "取消" : {
+
+    },
+    "可能没有相机权限,或正在模拟器中运行" : {
+
     },
     "同步" : {
       "extractionState" : "manual",
@@ -356,6 +402,9 @@
         }
       }
     },
+    "在系统设置中开启「位置」权限以读取当前 WiFi" : {
+
+    },
     "基本" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -368,6 +417,9 @@
       }
     },
     "复制内容后会自动同步上传" : {
+
+    },
+    "好" : {
 
     },
     "完成" : {
@@ -392,6 +444,23 @@
         }
       }
     },
+    "将删除「%@」。此操作无法撤销。" : {
+
+    },
+    "将显示在剪贴板顶栏。留空会用服务器地址替代。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shown on the Clipboard toolbar. Falls back to the server address when left blank."
+          }
+        }
+      }
+    },
+    "将服务器二维码对准框内" : {
+
+    },
     "局域网或自签名证书时勾选" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -402,6 +471,12 @@
           }
         }
       }
+    },
+    "局域网或自签名证书时勾选。此设置全局生效。" : {
+
+    },
+    "左滑可设为活动服务器或删除。自动切换：连接到匹配 SSID 时自动切换到该服务器。" : {
+
     },
     "已保存到 %@" : {
       "extractionState" : "manual",
@@ -530,6 +605,12 @@
         }
       }
     },
+    "当前设备无法扫描二维码" : {
+
+    },
+    "当前设备无法读取 WiFi 名称" : {
+
+    },
     "忽略的版本" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -551,6 +632,32 @@
           }
         }
       }
+    },
+    "手动添加 WiFi 名称" : {
+
+    },
+    "打开设置" : {
+
+    },
+    "扫一扫" : {
+
+    },
+    "换一个名称" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generate another name"
+          }
+        }
+      }
+    },
+    "授权" : {
+
+    },
+    "授权位置以读取当前 WiFi" : {
+
     },
     "接收超时 — 请稍后重试" : {
 
@@ -598,6 +705,9 @@
           }
         }
       }
+    },
+    "无法识别该二维码" : {
+
     },
     "无法读取本机剪贴板" : {
       "extractionState" : "manual",
@@ -677,6 +787,9 @@
     "服务器尚未发布剪贴板" : {
 
     },
+    "服务器已不存在" : {
+
+    },
     "服务器返回 HTTP %lld" : {
 
     },
@@ -706,6 +819,9 @@
       }
     },
     "服务器错误 %lld" : {
+
+    },
+    "未连接 WiFi" : {
 
     },
     "未配置" : {
@@ -995,6 +1111,9 @@
         }
       }
     },
+    "还没有服务器" : {
+
+    },
     "连接" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1005,6 +1124,9 @@
           }
         }
       }
+    },
+    "连接到这里的任一 SSID 时，会自动切换到该服务器。" : {
+
     },
     "连接超时 — 请检查服务器地址" : {
 
@@ -1027,50 +1149,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Default"
-          }
-        }
-      }
-    },
-    "便于辨识的名称" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Friendly name"
-          }
-        }
-      }
-    },
-    "换一个名称" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Generate another name"
-          }
-        }
-      }
-    },
-    "将显示在剪贴板顶栏。留空会用服务器地址替代。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shown on the Clipboard toolbar. Falls back to the server address when left blank."
-          }
-        }
-      }
-    },
-    "切换服务器" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Switch server"
           }
         }
       }

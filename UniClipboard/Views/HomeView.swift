@@ -55,7 +55,9 @@ struct HomeView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 ServerChip(
-                    activeServer: vm.servers.activeConfig,
+                    activeServer: vm.effectiveActiveConfig,
+                    defaultServerId: vm.servers.activeConfigId,
+                    isAutoSwitched: vm.isAutoSwitchOverridden,
                     allServers: vm.servers.configs,
                     onSelect: { id in vm.servers.activeConfigId = id }
                 )
@@ -411,7 +413,16 @@ private struct DeviceClipboardCard: View {
 // MARK: - Top toolbar server chip
 
 private struct ServerChip: View {
+    /// Effective active server — what the sync engine is actually talking
+    /// to right now. May differ from the user's default when a Wi-Fi
+    /// auto-switch is in effect (§5.3).
     let activeServer: ServerConfig?
+    /// User-chosen default. Sheet rows annotate it with "默认" so the
+    /// override semantics stay legible.
+    let defaultServerId: String?
+    /// True iff `activeServer.id != defaultServerId`. Drives the small
+    /// wifi sub-icon on the chip.
+    let isAutoSwitched: Bool
     let allServers: [ServerConfig]
     let onSelect: (String) -> Void
 
@@ -423,9 +434,16 @@ private struct ServerChip: View {
         // SwiftUI's navigation bar squeezes the leading toolbar item to
         // ~30pt and truncates the alias Text to zero width.
         HStack(spacing: 6) {
-            Circle()
-                .fill(.green)
-                .frame(width: 6, height: 6)
+            if isAutoSwitched {
+                Image(systemName: "wifi")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            } else {
+                Circle()
+                    .fill(.green)
+                    .frame(width: 6, height: 6)
+            }
             Text(verbatim: activeServer?.displayLabel ?? String(localized: "未配置"))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
@@ -442,11 +460,12 @@ private struct ServerChip: View {
         .onTapGesture { showingSwitcher = true }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(Text("切换服务器"))
+        .accessibilityLabel(Text(isAutoSwitched ? "切换服务器 · 已根据 WiFi 自动切换" : "切换服务器"))
         .accessibilityValue(Text(activeServer?.displayLabel ?? String(localized: "未配置")))
         .sheet(isPresented: $showingSwitcher) {
             ServerSwitcherSheet(
                 activeId: activeServer?.id,
+                defaultId: defaultServerId,
                 servers: allServers,
                 onSelect: { id in
                     onSelect(id)
@@ -461,6 +480,7 @@ private struct ServerChip: View {
 
 private struct ServerSwitcherSheet: View {
     let activeId: String?
+    let defaultId: String?
     let servers: [ServerConfig]
     let onSelect: (String) -> Void
 
@@ -473,7 +493,8 @@ private struct ServerSwitcherSheet: View {
                     } label: {
                         ServerSwitcherRow(
                             server: server,
-                            isActive: server.id == activeId
+                            isActive: server.id == activeId,
+                            isDefault: server.id == defaultId
                         )
                     }
                     .buttonStyle(.plain)
@@ -494,6 +515,7 @@ private struct ServerSwitcherSheet: View {
 private struct ServerSwitcherRow: View {
     let server: ServerConfig
     let isActive: Bool
+    let isDefault: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -503,9 +525,22 @@ private struct ServerSwitcherRow: View {
                 .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(server.displayLabel)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.primary)
+                HStack(spacing: 6) {
+                    Text(server.displayLabel)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if isDefault && !isActive {
+                        // Auto-switch swapped the active away from this
+                        // user-default; surface the override so they
+                        // don't think the chip picked the wrong row.
+                        Text("默认")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.secondary.opacity(0.15), in: Capsule())
+                    }
+                }
                 Text(server.url)
                     .font(.caption)
                     .foregroundStyle(.secondary)

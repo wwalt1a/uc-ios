@@ -49,6 +49,13 @@ fixtures conform to. Section numbers below reference that document.
 | `app_settings.json` | `app_settings` | Every field set to a non-default value, exercising `ignoredVersion` (a non-null optional). |
 | `app_settings_minimal.json` | `app_settings` | Only the required fields. `ignoredVersion` is **omitted** (not `null`) — verify your decoder handles this case and your encoder produces this shape when the value is `nil`. |
 
+## QR-import fixtures (§5.6, UniClipboard extension)
+
+| File | Format | Notes |
+|---|---|---|
+| `server_qr_payload.json` | JSON object | Canonical UniClipboard QR payload. All required fields (`url`, `username`, `password`) present plus optional `name`. Encode this as the textual content of a QR code to drive the Settings → Servers → Add scan flow. |
+| `server_qr_payload_url.txt` | URL with userinfo | Fallback format. The userinfo segment carries credentials; password's `!` is percent-encoded as `%21` per RFC 3986. On scan, the receiver strips the userinfo and stores `url = https://clip.home.lan:5033/`. |
+
 ### What to assert in your decoder tests
 
 - `server_config.name` is optional. Missing key, `null`, and empty string

@@ -5,6 +5,12 @@ struct ContentView: View {
 
     @State private var selection: Int = Self.initialTab
 
+    /// Path for the Settings tab's NavigationStack. Initial value lets a
+    /// `UC_SETTINGS_ROUTE=servers` env hook deep-link into the Servers
+    /// list (or `servers/edit/<idx>` to land on the editor) — needed
+    /// because simctl can't synthesize taps for screenshot recipes.
+    @State private var settingsPath: [SettingsRoute] = SettingsRoute.initialPath()
+
     @Environment(\.scenePhase) private var scenePhase
 
     private static var initialTab: Int {
@@ -38,8 +44,8 @@ struct ContentView: View {
                 }
             }
             Tab("设置", systemImage: "gearshape.fill", value: 2) {
-                NavigationStack {
-                    SettingsView(vm: vm)
+                NavigationStack(path: $settingsPath) {
+                    SettingsView(vm: vm, path: $settingsPath)
                 }
             }
         }
@@ -62,7 +68,12 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
-            case .active:     vm.engine.start()
+            case .active:
+                // Refresh SSID before the engine reads `effectiveActiveConfig`
+                // so a Wi-Fi flip while the app was backgrounded surfaces
+                // on the first foreground tick instead of one cycle later.
+                vm.ssidProvider.refresh()
+                vm.engine.start()
             case .background: vm.engine.stop()
             case .inactive:   break  // brief — Notification Center pull-down etc; keep ticking
             @unknown default: break

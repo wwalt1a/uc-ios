@@ -413,6 +413,82 @@ Legacy `server_config` shape (read-only, write-once-on-migrate):
 { "url": "...", "username": "...", "password": "..." }
 ```
 
+### 5.6 QR-code import payload (UniClipboard extension)
+
+UniClipboard supports importing a server configuration by scanning a QR
+code from the **Settings → Servers → Add → "从二维码填充"** flow. This is
+a UniClipboard-only convention; upstream SyncClipboard has no QR format
+and other clients are not required to interoperate with it.
+
+A scanned barcode is decoded as a UTF-8 string and dispatched, in
+priority order:
+
+1. **JSON object** (preferred — can carry an alias)
+2. **URL with userinfo** (fallback — fits any QR generator)
+
+Anything else fails parsing and surfaces an inline alert; the scanner
+keeps running so the user can try another code.
+
+#### Format 1: JSON object
+
+```jsonc
+{
+  "url":      "https://clip.home.lan:5033/",   // required, non-empty
+  "username": "alice",                          // required, non-empty
+  "password": "p4ssw0rd!",                      // required, non-empty
+  "name":     "Home NAS"                        // optional
+}
+```
+
+Rules:
+
+- `url`, `username`, `password` are required and MUST be non-empty
+  strings. A payload missing any of them, or with empty-string values,
+  is rejected.
+- `name` is optional. When absent, the consumer falls back to a
+  generated alias (see [`ServerNameGenerator`](../UniClipboard/Models/ServerNameGenerator.swift)).
+- Unknown keys are tolerated and ignored. A future revision can add
+  fields (e.g. an explicit `trustInsecureCert` hint) without breaking
+  older scanners.
+- A `type` discriminator field is NOT required. If a future version
+  introduces one, scanners SHOULD still accept payloads without it.
+
+#### Format 2: URL with userinfo
+
+```
+https://alice:p4ssw0rd!@clip.home.lan:5033/
+```
+
+Rules:
+
+- The URL MUST parse as a valid `URL` and carry both a `user` and a
+  `password` component. Missing either component rejects the payload.
+- The reconstructed `url` field (passed to the Add form) is the URL
+  **without** the userinfo segment — i.e. `https://clip.home.lan:5033/`.
+- `name` is always nil for this format (URL syntax has no slot for it).
+- Special characters in user/password MUST be percent-encoded by the
+  generator. The scanner percent-decodes both before assigning to the
+  draft.
+
+#### Receiver behavior
+
+After a successful parse, the scanner:
+
+1. Dismisses the camera cover.
+2. Opens the Add Server sheet pre-filled with the payload's fields.
+3. Leaves `trustInsecureCert` at the app-wide default — the QR format
+   does not carry it deliberately, so the user can confirm.
+4. Leaves the autoSwitch SSID list empty — auto-switch is per-device
+   network state, not a portable identity, and shouldn't be cloned.
+
+The user can edit any field before tapping **保存**, and **测试连接**
+runs against the in-form draft using the shared `ConnectionTester`.
+
+#### Worked examples
+
+See [`examples/server_qr_payload.json`](./examples/server_qr_payload.json)
+and [`examples/server_qr_payload_url.txt`](./examples/server_qr_payload_url.txt).
+
 ---
 
 ## 6. Error model

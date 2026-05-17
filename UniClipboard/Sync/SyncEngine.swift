@@ -151,10 +151,14 @@ final class SyncEngine {
 
     /// Called by `AppViewModel.servers.didSet`. Decides whether to clear
     /// per-server state and / or restart a paused (.authFailed) loop.
+    /// Compares effective (SSID-resolved) configs because an SSID-list
+    /// edit on a non-active server can flip the effective active without
+    /// touching `activeConfigId`.
     func handleServersChange(from old: ServerConfigList, to new: ServerConfigList) {
-        let oldActiveId = old.activeConfig?.id
-        let newActiveId = new.activeConfig?.id
-        if oldActiveId != newActiveId {
+        let ssid = viewModel?.ssidProvider.currentSSID
+        let oldEffectiveId = old.resolveActiveConfig(currentSsid: ssid)?.id
+        let newEffectiveId = new.resolveActiveConfig(currentSsid: ssid)?.id
+        if oldEffectiveId != newEffectiveId {
             // Different server entirely — content timeline differs, drop hash.
             resetRuntimeState()
             lastSyncedContentHash = nil
@@ -165,6 +169,24 @@ final class SyncEngine {
             // see whether the new ones work; if not we'll land back in
             // .authFailed within one tick.
             start()
+        }
+    }
+
+    /// Called when the effective active server changed due to a Wi-Fi
+    /// flip (not a config edit). Drops per-server runtime state and
+    /// forces an immediate tick so the new server's clipboard surfaces
+    /// without waiting for the 1Hz cadence.
+    func handleEffectiveActiveChange() {
+        // §5.3: switching servers is a content-timeline change. Drop the
+        // staged + last-synced hashes so the new server's first entry
+        // isn't mistaken for a duplicate.
+        resetRuntimeState()
+        lastSyncedContentHash = nil
+        store.saveLastSyncedHash(nil)
+        if state == .authFailed {
+            start()
+        } else {
+            forceTickNow()
         }
     }
 
@@ -185,7 +207,7 @@ final class SyncEngine {
             if explicit { isExplicitlyRefreshing = false }
         }
         guard let vm = viewModel,
-              let server = vm.servers.activeConfig else {
+              let server = vm.effectiveActiveConfig else {
             state = .idle
             return
         }
