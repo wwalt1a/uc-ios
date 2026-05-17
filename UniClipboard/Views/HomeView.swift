@@ -178,7 +178,17 @@ struct HomeView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 if engineState == .hasNewUnwritten {
                     PendingBanner {
-                        Task { await vm.applyServerToDevice() }
+                        Task {
+                            await vm.applyServerToDevice()
+                            // `applyError == nil` covers the text-no-data (sync
+                            // path, applyError is set to nil before return) and
+                            // text/image-with-data success cases. On a network
+                            // failure applyError is set, banner stays so the
+                            // user can retry.
+                            if vm.applyError == nil {
+                                vm.engine.markStagedApplied()
+                            }
+                        }
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }

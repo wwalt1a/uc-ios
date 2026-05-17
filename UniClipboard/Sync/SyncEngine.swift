@@ -159,6 +159,22 @@ final class SyncEngine {
         await tick(explicit: true)
     }
 
+    /// Called by the UI when the user manually applies a staged server
+    /// entry (e.g. taps "应用" on the home-screen banner). Advances
+    /// `lastSyncedContentHash` to the staged hash and clears the staged
+    /// state so the next tick exits `.hasNewUnwritten` instead of
+    /// re-observing the same server hash and re-staging it forever.
+    /// No-op when nothing is staged.
+    func markStagedApplied() {
+        guard let hash = stagedServerHash else { return }
+        advanceSynced(to: hash)
+        stagedServerHash = nil
+        stagedEntry = nil
+        state = .succeeded
+        lastSyncedAt = .now
+        lastError = nil
+    }
+
     /// Clear runtime state without touching persisted hash. Useful when the
     /// user switches active server — the new server has its own content
     /// timeline.
