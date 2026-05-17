@@ -1,49 +1,69 @@
 import SwiftUI
 
-/// Home tab — the focal point. Two cards (Server vs Device) bridged by a
-/// connector strip that mirrors the auto-sync engine's current state.
-/// Cycle 9: removed the "推送" floating accessory and the "应用到本机"
-/// button — the engine handles both directions on a 1Hz foreground tick.
-/// Save-to-Documents stays as a discrete user action on the server card.
+/// Home tab — single focal card.
+///
+/// Cycle 9 removed the manual "推送" / "应用到本机" buttons; the engine
+/// converges both directions on a 1Hz foreground tick, so the server
+/// snapshot and the device pasteboard are nearly always the same string.
+/// Cycle 10 collapses the previous Server-card + connector + Device-card
+/// stack into one card that shows "what's on the clipboard right now",
+/// with engine state surfaced as a thin status row and exceptional
+/// outcomes (auth fail, save error, save success, …) shown as a slim
+/// bar pinned to the card's bottom edge.
 struct HomeView: View {
     @Bindable var vm: AppViewModel
+
+    /// Injected by `ContentView` so the error-detail sheet's "去设置" CTA
+    /// can flip the TabView selection without HomeView knowing about it.
+    var onGoToSettings: () -> Void = {}
+
+    @State private var showingErrorSheet: Bool =
+        ProcessInfo.processInfo.environment["UC_OPEN_ISSUE_SHEET"] == "1"
 
     private var engineState: SyncEngine.State { vm.engine.state }
     private var isExplicitlyRefreshing: Bool { vm.engine.isExplicitlyRefreshing }
 
-    /// Server has a pending entry waiting for the user (auto-apply off).
-    /// Drives card highlight and auto-expanded preview.
-    private var serverHasUnwritten: Bool { engineState == .hasNewUnwritten }
+    /// What to render in the card body. The engine keeps both sides in sync
+    /// so these are almost always the same content; we prefer the server
+    /// copy because it carries the canonical `hash` / `dataName` metadata
+    /// the UI shows in the size row and the save-to-Documents action.
+    private var displayedEntry: Clipboard? {
+        vm.serverLatest ?? vm.deviceClipboard
+    }
+
+    /// Last sync timestamp shown in the card's metadata row. Falls back to
+    /// the VM's snapshot timestamp for cold-launch or before the engine's
+    /// first tick lands.
+    private var lastSyncedAt: Date? {
+        vm.engine.lastSyncedAt ?? vm.lastSyncedAt
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                if let err = vm.engine.lastError {
-                    errorRow(err, prefix: "")
+        // GeometryReader + minHeight lets the card vertically center when
+        // content is short (empty state, single-line text) while still
+        // scrolling cleanly when text overflows the viewport. Without the
+        // minHeight pin the ScrollView shrinks to fit its content and the
+        // card sticks to the top.
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    ClipboardCard(
+                        entry: displayedEntry,
+                        lastSyncedAt: lastSyncedAt,
+                        status: cardStatus,
+                        isSaving: vm.isSaving,
+                        lastSavedFileURL: vm.lastSavedFileURL,
+                        saveError: vm.saveError,
+                        bottomBar: bottomBar,
+                        onSave: { Task { await vm.saveServerAttachment() } }
+                    )
+                    Spacer(minLength: 0)
                 }
-                if let err = vm.saveError {
-                    errorRow(err, prefix: String(localized: "保存失败:"))
-                }
-
-                ServerSnapshotCard(
-                    entry: vm.serverLatest,
-                    lastSyncedAt: vm.engine.lastSyncedAt ?? vm.lastSyncedAt,
-                    isSaving: vm.isSaving,
-                    lastSavedFileURL: vm.lastSavedFileURL,
-                    isHighlighted: serverHasUnwritten,
-                    onSave: { Task { await vm.saveServerAttachment() } }
-                )
-
-                connector
-
-                DeviceClipboardCard(
-                    entry: vm.deviceClipboard,
-                    inSyncWithServer: engineState == .succeeded
-                )
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(minHeight: geo.size.height)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 24)
         }
         .refreshable {
             await vm.engine.explicitRefresh()
@@ -62,6 +82,17 @@ struct HomeView: View {
                     onSelect: { id in vm.servers.activeConfigId = id }
                 )
             }
+            if let issue = currentIssue {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingErrorSheet = true
+                    } label: {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundStyle(issue.tint)
+                    }
+                    .accessibilityLabel(Text(issue.title))
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     vm.engine.forceTickNow()
@@ -75,32 +106,82 @@ struct HomeView: View {
                 .disabled(isExplicitlyRefreshing)
             }
         }
+        .sheet(isPresented: $showingErrorSheet) {
+            if let issue = currentIssue {
+                IssueDetailSheet(
+                    issue: issue,
+                    onPrimaryAction: {
+                        showingErrorSheet = false
+                        switch issue.primaryAction {
+                        case .goToSettings: onGoToSettings()
+                        case .retry:        vm.engine.forceTickNow()
+                        case .dismiss:      break
+                        }
+                    }
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+        }
     }
 
-    @ViewBuilder
-    private func errorRow(_ err: SyncError, prefix: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(prefix.isEmpty ? errorMessage(err) : "\(prefix) \(errorMessage(err))")
-                    .font(.footnote)
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                if let detail = err.underlying, !detail.isEmpty {
-                    Text(detail)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(4)
-                        .textSelection(.enabled)
-                }
-            }
-            Spacer()
+    /// Active error worth surfacing as the toolbar's red bang. `nil` keeps
+    /// the chrome clean. Priority: save-failure (user-initiated, sticky
+    /// until next attempt) > engine state (auth fail > offline). Note that
+    /// `.hasNewUnwritten` is *not* an issue — it's an opt-in waiting state
+    /// the user signed up for by turning auto-apply off.
+    private var currentIssue: HomeIssue? {
+        if let err = vm.saveError {
+            return .saveFailed(message: errorMessage(err), detail: err.underlying)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        switch engineState {
+        case .authFailed:
+            return .authFailed(detail: vm.engine.lastError?.underlying)
+        case .offlineRetrying:
+            if let err = vm.engine.lastError {
+                return .offline(message: errorMessage(err), detail: err.underlying)
+            }
+            return .offline(message: String(localized: "离线 · 重试中"), detail: nil)
+        case .idle, .succeeded, .hasNewUnwritten:
+            return nil
+        }
+    }
+
+    /// Maps engine state to the small status pill drawn in the card's
+    /// metadata row. `nil` keeps the row clean when there's nothing
+    /// useful to say (idle with no content yet — the empty state takes
+    /// over).
+    private var cardStatus: ClipboardCard.Status? {
+        if isExplicitlyRefreshing { return .syncing }
+        switch engineState {
+        case .idle:
+            return displayedEntry == nil ? nil : .syncing
+        case .succeeded:
+            return .synced
+        case .hasNewUnwritten:
+            // The bottom bar carries the actionable copy; the pill just
+            // mirrors the same idea so the row doesn't read "已同步" while
+            // the bar says otherwise.
+            return .pending
+        case .offlineRetrying:
+            return .offline
+        case .authFailed:
+            return .authFailed
+        }
+    }
+
+    /// Bottom-bar payload. Only carries *informational* states now —
+    /// "已保存到 …" (transient positive feedback) and "服务器有新内容"
+    /// (an opt-in waiting state). Hard errors moved to the toolbar's red
+    /// bang + detail sheet, so the card itself never wears warning paint.
+    private var bottomBar: ClipboardCard.BottomBar? {
+        if let url = vm.lastSavedFileURL {
+            return .saved(url: url)
+        }
+        if engineState == .hasNewUnwritten {
+            return .pendingApply
+        }
+        return nil
     }
 
     private func errorMessage(_ err: SyncError) -> String {
@@ -117,295 +198,403 @@ struct HomeView: View {
         case .hashMismatch:              return String(localized: "内容校验失败 — 文件可能损坏")
         }
     }
-
-    private var connector: some View {
-        HStack(spacing: 8) {
-            if isExplicitlyRefreshing {
-                ProgressView().controlSize(.mini)
-            } else {
-                Image(systemName: connectorIcon)
-                    .foregroundStyle(connectorTint)
-            }
-            Text(connectorText)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 8)
-    }
-
-    private var connectorIcon: String {
-        switch engineState {
-        case .idle:             return "circle.dashed"
-        case .succeeded:        return "checkmark.circle.fill"
-        case .hasNewUnwritten:  return "tray.and.arrow.down.fill"
-        case .offlineRetrying:  return "arrow.triangle.2.circlepath"
-        case .authFailed:       return "lock.slash.fill"
-        }
-    }
-
-    private var connectorTint: Color {
-        switch engineState {
-        case .succeeded:        return .green
-        case .hasNewUnwritten:  return .indigo
-        case .offlineRetrying:  return .orange
-        case .authFailed:       return .red
-        case .idle:             return .secondary
-        }
-    }
-
-    private var connectorText: LocalizedStringKey {
-        if isExplicitlyRefreshing { return "同步中…" }
-        switch engineState {
-        case .idle:             return "准备同步…"
-        case .succeeded:
-            return vm.serverLatest == nil ? "已同步 · 等待新内容" : "已同步"
-        case .hasNewUnwritten:  return "有新内容 · 未自动写入"
-        case .offlineRetrying:  return "离线 · 重试中"
-        case .authFailed:       return "认证失败 · 检查设置"
-        }
-    }
 }
 
-// MARK: - Server's-latest card
+// MARK: - Single clipboard card
 
-private struct ServerSnapshotCard: View {
+private struct ClipboardCard: View {
+    enum Status {
+        case syncing, synced, pending, offline, authFailed
+    }
+
+    enum BottomBar {
+        case saved(url: URL)
+        case pendingApply
+    }
+
     let entry: Clipboard?
     let lastSyncedAt: Date?
+    let status: Status?
     let isSaving: Bool
     let lastSavedFileURL: URL?
-    /// True when the engine has staged a new server entry that wasn't
-    /// auto-written (auto-apply toggle is off). Card border / background
-    /// pop, preview expands.
-    let isHighlighted: Bool
+    let saveError: SyncError?
+    let bottomBar: BottomBar?
     let onSave: () -> Void
 
-    /// Save means "write the payload to Documents". Image and file are
-    /// supported this cycle; Group disabled until §4.3 ZIP-traversal hash
-    /// has its own slice.
     private var canSave: Bool {
-        guard let e = entry else { return false }
-        return e.hasData && (e.type == .image || e.type == .file)
+        guard let entry else { return false }
+        return entry.hasData && (entry.type == .image || entry.type == .file)
     }
 
     var body: some View {
-        GlassCard(highlighted: isHighlighted) {
-            if let entry {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        ClipboardKindBadge(kind: entry.type, size: .medium)
-                        Spacer()
-                        Text("服务器")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .background(.tertiary.opacity(0.4), in: Capsule())
-                    }
-
-                    previewBlock(entry: entry, expanded: isHighlighted)
-
-                    metadataRow(entry: entry)
-
-                    if entry.hasData && (entry.type == .image || entry.type == .file) {
-                        Divider().opacity(0.4)
-                        Button {
-                            onSave()
-                        } label: {
-                            HStack(spacing: 6) {
-                                if isSaving {
-                                    ProgressView().controlSize(.small)
-                                    Text("正在保存…")
-                                } else {
-                                    Image(systemName: "square.and.arrow.down")
-                                    Text("保存到 Documents")
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .disabled(!canSave || isSaving)
-                    }
-
-                    if let savedURL = lastSavedFileURL {
-                        savedToCaption(url: savedURL)
-                    }
+        if let entry {
+            VStack(spacing: 0) {
+                contentBlock(entry: entry)
+                if let bottomBar {
+                    Divider().opacity(0.25)
+                    bottomBarView(bottomBar)
                 }
-            } else {
-                emptyState
+            }
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            )
+        } else {
+            // No card chrome on the empty state — ContentUnavailableView
+            // is the iOS 17+ native pattern (large symbol, headline,
+            // secondary copy), centered without a container.
+            emptyState
+        }
+    }
+
+    // MARK: Content
+
+    @ViewBuilder
+    private func contentBlock(entry: Clipboard) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            header(entry: entry)
+            preview(entry: entry)
+            metadataRow(entry: entry)
+            if canSave {
+                saveButton
+            }
+        }
+        .padding(20)
+    }
+
+    private func header(entry: Clipboard) -> some View {
+        HStack(spacing: 10) {
+            ClipboardKindBadge(kind: entry.type, size: .small)
+            Spacer()
+            if let status, status != .synced {
+                statusPill(for: status)
             }
         }
     }
 
     @ViewBuilder
-    private func previewBlock(entry: Clipboard, expanded: Bool) -> some View {
+    private func preview(entry: Clipboard) -> some View {
         switch entry.type {
         case .text:
             Text(entry.text)
-                .font(.callout)
+                .font(.title3)
                 .foregroundStyle(.primary)
-                .lineLimit(expanded ? 12 : 4)
+                .lineLimit(6)
                 .multilineTextAlignment(.leading)
-                .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+                .textSelection(.enabled)
         case .image, .file, .group:
             HStack(spacing: 14) {
                 ClipboardKindBadge(kind: entry.type, size: .large, showsLabel: false)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(entry.text)
-                        .font(.callout.weight(.semibold))
+                        .font(.headline)
                         .lineLimit(1)
                     if let dataName = entry.dataName, dataName != entry.text {
                         Text(dataName)
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .padding(14)
-            .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
         }
     }
 
     private func metadataRow(entry: Clipboard) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             if let size = entry.size {
-                Label(formatSize(size, kind: entry.type), systemImage: "ruler")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(formatSize(size, kind: entry.type))
             }
+            if entry.size != nil, lastSyncedAt != nil { dot }
             if let lastSyncedAt {
-                Label(lastSyncedAt.relativeShort, systemImage: "clock")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(lastSyncedAt.relativeShort)
             }
-            Spacer()
-            if let hash = entry.hash {
-                Text(hash.shortHash)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    /// "已保存到 …/<dataName>" line under the action row. Sticky until
-    /// the next save attempt or a refresh — `AppViewModel` clears it.
-    private func savedToCaption(url: URL) -> some View {
-        let leaf = url.pathComponents.suffix(2).joined(separator: "/")
-        return HStack(spacing: 6) {
-            Image(systemName: "tray.and.arrow.down.fill")
-                .foregroundStyle(.green)
-            Text("已保存到 \(leaf)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer()
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "icloud.slash")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("服务器还没有发布过剪贴板")
-                .font(.subheadline.weight(.semibold))
-            Text("复制内容后会自动同步上传")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
-    }
-}
-
-// MARK: - Device-current card
-
-private struct DeviceClipboardCard: View {
-    let entry: Clipboard?
-    let inSyncWithServer: Bool
-
-    var body: some View {
-        GlassCard {
-            if let entry {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        ClipboardKindBadge(kind: entry.type, size: .medium)
-                        Spacer()
-                        Text(inSyncWithServer ? "已同步" : "本机")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(inSyncWithServer ? .green : .indigo)
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .background(
-                                (inSyncWithServer ? Color.green : Color.indigo).opacity(0.12),
-                                in: Capsule()
-                            )
-                    }
-
-                    previewBlock(entry: entry)
-
-                    if let size = entry.size {
-                        HStack(spacing: 10) {
-                            Label(formatSize(size, kind: entry.type), systemImage: sizeIcon(for: entry.type))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                    }
+            if let status, status == .synced {
+                if entry.size != nil || lastSyncedAt != nil { dot }
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("已同步")
                 }
-            } else {
-                Text("无法读取本机剪贴板")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
             }
+            Spacer(minLength: 0)
         }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+    }
+
+    private var dot: some View {
+        Text("·").foregroundStyle(.tertiary)
+    }
+
+    private func statusPill(for status: Status) -> some View {
+        HStack(spacing: 5) {
+            statusIcon(for: status)
+                .font(.caption2.weight(.semibold))
+            Text(statusLabel(for: status))
+                .font(.caption.weight(.medium))
+        }
+        .foregroundStyle(statusTint(for: status))
+        .padding(.vertical, 4)
+        .padding(.horizontal, 9)
+        .background(statusTint(for: status).opacity(0.12), in: Capsule())
     }
 
     @ViewBuilder
-    private func previewBlock(entry: Clipboard) -> some View {
-        switch entry.type {
-        case .text:
-            Text(entry.text)
-                .font(.callout)
-                .lineLimit(3)
-                .multilineTextAlignment(.leading)
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
-        case .image, .file, .group:
-            HStack(spacing: 14) {
-                ClipboardKindBadge(kind: entry.type, size: .large, showsLabel: false)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.text)
-                        .font(.callout.weight(.semibold))
-                        .lineLimit(1)
-                    if let dataName = entry.dataName, dataName != entry.text {
-                        Text(dataName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-            }
-            .padding(14)
-            .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+    private func statusIcon(for status: Status) -> some View {
+        switch status {
+        case .syncing:    ProgressView().controlSize(.mini)
+        case .synced:     Image(systemName: "checkmark")
+        case .pending:    Image(systemName: "tray.and.arrow.down")
+        case .offline:    Image(systemName: "wifi.exclamationmark")
+        case .authFailed: Image(systemName: "lock.fill")
         }
     }
 
-    private func sizeIcon(for kind: Clipboard.Kind) -> String {
-        switch kind {
-        case .text:                  return "character"
-        case .image, .file, .group:  return "ruler"
+    private func statusLabel(for status: Status) -> LocalizedStringKey {
+        switch status {
+        case .syncing:    "同步中"
+        case .synced:     "已同步"
+        case .pending:    "待应用"
+        case .offline:    "离线"
+        case .authFailed: "认证失败"
+        }
+    }
+
+    private func statusTint(for status: Status) -> Color {
+        switch status {
+        case .syncing:    .secondary
+        case .synced:     .green
+        case .pending:    .indigo
+        case .offline:    .orange
+        case .authFailed: .red
+        }
+    }
+
+    private var saveButton: some View {
+        Button {
+            onSave()
+        } label: {
+            HStack(spacing: 6) {
+                if isSaving {
+                    ProgressView().controlSize(.small)
+                    Text("正在保存…")
+                } else {
+                    Image(systemName: "square.and.arrow.down")
+                    Text("保存到 Documents")
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .disabled(!canSave || isSaving)
+    }
+
+    // MARK: Empty state
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label {
+                Text("还没有同步过剪贴板")
+            } icon: {
+                Image(systemName: "doc.on.clipboard")
+            }
+        } description: {
+            Text("复制任何内容会自动同步")
+        }
+    }
+
+    // MARK: Bottom bar
+
+    @ViewBuilder
+    private func bottomBarView(_ bar: BottomBar) -> some View {
+        switch bar {
+        case .saved(let url):
+            BottomBarRow(
+                icon: "checkmark.circle.fill",
+                tint: .green,
+                title: String(localized: "已保存到 \(displayPath(for: url))")
+            )
+        case .pendingApply:
+            BottomBarRow(
+                icon: "tray.and.arrow.down.fill",
+                tint: .indigo,
+                title: String(localized: "服务器有新内容，未自动写入本机")
+            )
+        }
+    }
+
+    private func displayPath(for url: URL) -> String {
+        url.pathComponents.suffix(2).joined(separator: "/")
+    }
+}
+
+// MARK: - Bottom bar row
+
+private struct BottomBarRow: View {
+    let icon: String
+    let tint: Color
+    let title: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: icon)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(tint.opacity(0.08))
+        .clipShape(
+            UnevenRoundedRectangle(
+                cornerRadii: .init(bottomLeading: 22, bottomTrailing: 22),
+                style: .continuous
+            )
+        )
+    }
+}
+
+// MARK: - Toolbar issue model + detail sheet
+
+/// An error that's worth a red bang in the toolbar. Carries enough copy
+/// to render both the icon's accessibility label and the detail sheet
+/// without HomeView needing to re-derive strings.
+private enum HomeIssue: Equatable {
+    case authFailed(detail: String?)
+    case offline(message: String, detail: String?)
+    case saveFailed(message: String, detail: String?)
+
+    enum PrimaryAction {
+        case goToSettings
+        case retry
+        case dismiss
+    }
+
+    var tint: Color {
+        switch self {
+        case .authFailed, .saveFailed: .red
+        case .offline:                 .orange
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .authFailed: "lock.fill"
+        case .offline:    "wifi.exclamationmark"
+        case .saveFailed: "exclamationmark.triangle.fill"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .authFailed: String(localized: "认证失败")
+        case .offline:    String(localized: "无法连接服务器")
+        case .saveFailed: String(localized: "保存失败")
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .authFailed:
+            String(localized: "请检查用户名和密码是否正确。修改后会自动重新同步。")
+        case .offline(let message, _):
+            message
+        case .saveFailed(let message, _):
+            message
+        }
+    }
+
+    var detail: String? {
+        switch self {
+        case .authFailed(let d), .offline(_, let d), .saveFailed(_, let d):
+            d
+        }
+    }
+
+    var primaryAction: PrimaryAction {
+        switch self {
+        case .authFailed: .goToSettings
+        case .offline:    .retry
+        case .saveFailed: .dismiss
+        }
+    }
+
+    var primaryActionLabel: LocalizedStringKey {
+        switch self {
+        case .authFailed: "去设置"
+        case .offline:    "立即重试"
+        case .saveFailed: "好"
+        }
+    }
+}
+
+private struct IssueDetailSheet: View {
+    let issue: HomeIssue
+    let onPrimaryAction: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: issue.symbolName)
+                .font(.system(size: 44, weight: .regular))
+                .foregroundStyle(issue.tint)
+                .padding(.top, 24)
+
+            VStack(spacing: 8) {
+                Text(issue.title)
+                    .font(.title3.weight(.semibold))
+                Text(issue.message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+
+            if let detail = issue.detail, !detail.isEmpty {
+                ScrollView {
+                    Text(detail)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .padding(12)
+                }
+                .frame(maxHeight: 80)
+                .background(Color(.secondarySystemBackground),
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal, 20)
+            }
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: 10) {
+                Button(action: onPrimaryAction) {
+                    Text(issue.primaryActionLabel)
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(issue.tint)
+
+                Button("关闭") { dismiss() }
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
         }
     }
 }
@@ -564,42 +753,18 @@ private struct ServerSwitcherRow: View {
     }
 }
 
-// MARK: - Glass card container
-
-private struct GlassCard<Content: View>: View {
-    var highlighted: Bool = false
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        content()
-            .padding(18)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(
-                        highlighted ? Color.indigo.opacity(0.7) : Color.white.opacity(0.12),
-                        lineWidth: highlighted ? 2 : 0.5
-                    )
-            )
-            .shadow(color: highlighted ? .indigo.opacity(0.18) : .black.opacity(0.06),
-                    radius: highlighted ? 16 : 12, y: 4)
-    }
-}
-
 // MARK: - Helpers
 
 private extension Date {
+    /// "刚刚" inside ±5s, otherwise the system relative formatter. Without
+    /// the floor `RelativeDateTimeFormatter` happily returns "0 秒后" for
+    /// `lastSyncedAt == .now`, which reads as a bug.
     var relativeShort: String {
+        let dt = timeIntervalSinceNow
+        if abs(dt) < 5 { return String(localized: "刚刚") }
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
         return f.localizedString(for: self, relativeTo: .now)
-    }
-}
-
-private extension String {
-    var shortHash: String {
-        guard count >= 12 else { return self }
-        return String(prefix(6)) + "…" + String(suffix(4))
     }
 }
 
@@ -623,26 +788,24 @@ private func previewVM(serverLatest: Clipboard?, lastSyncedAt: Date?, deviceText
     return vm
 }
 
-#Preview("Home — 不一致") {
-    NavigationStack {
-        HomeView(vm: previewVM(
-            serverLatest: Mock.serverLatest,
-            lastSyncedAt: Mock.serverLastSyncedAt,
-            deviceText: Mock.deviceClipboard.text
-        ))
-    }
-    .tint(.indigo)
-}
-
 #Preview("Home — 已同步") {
-    // Server side and device side must be the same text-typed Clipboard;
-    // image-typed Mock.serverLatest can no longer match a UIPasteboard string.
     let synced = "Hello, SyncClipboard!"
     NavigationStack {
         HomeView(vm: previewVM(
             serverLatest: Clipboard.fromText(synced),
             lastSyncedAt: Mock.serverLastSyncedAt,
             deviceText: synced
+        ))
+    }
+    .tint(.indigo)
+}
+
+#Preview("Home — 图片附件") {
+    NavigationStack {
+        HomeView(vm: previewVM(
+            serverLatest: Mock.serverLatest,
+            lastSyncedAt: Mock.serverLastSyncedAt,
+            deviceText: nil
         ))
     }
     .tint(.indigo)

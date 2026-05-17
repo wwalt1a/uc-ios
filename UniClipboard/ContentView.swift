@@ -35,7 +35,7 @@ struct ContentView: View {
         TabView(selection: $selection) {
             Tab("剪贴板", systemImage: "doc.on.clipboard.fill", value: 0) {
                 NavigationStack {
-                    HomeView(vm: vm)
+                    HomeView(vm: vm, onGoToSettings: { selection = 2 })
                 }
             }
             Tab("历史", systemImage: "clock.fill", value: 1) {

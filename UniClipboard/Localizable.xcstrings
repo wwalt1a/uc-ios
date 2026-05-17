@@ -15,17 +15,6 @@
         }
       }
     },
-    "原服务器已不可用,已切换到当前活动服务器" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The original server is no longer available; switched to the current active server."
-          }
-        }
-      }
-    },
     "「%@」是最后一台服务器。删除后将返回首次设置流程。" : {
 
     },
@@ -193,6 +182,9 @@
     "保存到 Documents" : {
 
     },
+    "保存失败" : {
+
+    },
     "保存失败:" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -225,6 +217,9 @@
           }
         }
       }
+    },
+    "关闭" : {
+
     },
     "其他" : {
       "extractionState" : "manual",
@@ -263,9 +258,6 @@
         }
       }
     },
-    "准备同步…" : {
-
-    },
     "凭据" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -289,6 +281,9 @@
       }
     },
     "切换服务器 · 已根据 WiFi 自动切换" : {
+
+    },
+    "刚刚" : {
 
     },
     "删除" : {
@@ -338,6 +333,20 @@
         }
       }
     },
+    "原服务器已不可用,已切换到当前活动服务器" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The original server is no longer available; switched to the current active server."
+          }
+        }
+      }
+    },
+    "去设置" : {
+
+    },
     "取消" : {
 
     },
@@ -355,7 +364,7 @@
         }
       }
     },
-    "同步中…" : {
+    "同步中" : {
 
     },
     "名称" : {
@@ -427,7 +436,7 @@
         }
       }
     },
-    "复制内容后会自动同步上传" : {
+    "复制任何内容会自动同步" : {
 
     },
     "好" : {
@@ -510,9 +519,6 @@
           }
         }
       }
-    },
-    "已同步 · 等待新内容" : {
-
     },
     "已添加" : {
       "extractionState" : "manual",
@@ -620,6 +626,9 @@
 
     },
     "当前设备无法读取 WiFi 名称" : {
+
+    },
+    "待应用" : {
 
     },
     "忽略的版本" : {
@@ -745,6 +754,9 @@
     "无法连接 — 请检查网络和 URL" : {
 
     },
+    "无法连接服务器" : {
+
+    },
     "日志" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -755,9 +767,6 @@
           }
         }
       }
-    },
-    "有新内容 · 未自动写入" : {
-
     },
     "服务器" : {
       "extractionState" : "manual",
@@ -799,6 +808,9 @@
 
     },
     "服务器已不存在" : {
+
+    },
+    "服务器有新内容，未自动写入本机" : {
 
     },
     "服务器返回 HTTP %lld" : {
@@ -978,6 +990,9 @@
         }
       }
     },
+    "离线" : {
+
+    },
     "离线 · 重试中" : {
 
     },
@@ -991,6 +1006,9 @@
           }
         }
       }
+    },
+    "立即重试" : {
+
     },
     "管理服务器" : {
       "extractionState" : "manual",
@@ -1061,6 +1079,9 @@
         }
       }
     },
+    "认证失败" : {
+
+    },
     "认证失败 — 检查用户名和密码" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1073,9 +1094,6 @@
       }
     },
     "认证失败 — 请检查用户名和密码" : {
-
-    },
-    "认证失败 · 检查设置" : {
 
     },
     "设为活动" : {
@@ -1121,6 +1139,12 @@
           }
         }
       }
+    },
+    "请检查用户名和密码是否正确。修改后会自动重新同步。" : {
+
+    },
+    "还没有同步过剪贴板" : {
+
     },
     "还没有服务器" : {
 

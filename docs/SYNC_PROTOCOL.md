@@ -54,8 +54,20 @@ exchange, no session, and no refresh.
 
 ## 2. Endpoints
 
-There are exactly three logical resources. The server is a thin WebDAV-style
-key/value store.
+The server exposes two logical resource families:
+
+1. **Live clipboard** — §2.1 – §2.4. The single most-recently-published entry
+   plus its payload file. WebDAV-style key/value store; what's there is what's
+   "current".
+2. **History** — §2.6 – §2.12. A first-class server-side store of past
+   entries with starring/pinning/soft-delete/versioning. Each record is
+   addressable; clients can list (paginated), update, and incrementally sync.
+
+Plus two utility endpoints (§2.5, §2.13).
+
+> The Android client (`src/services/SyncClipboardClient.ts`) is the reference
+> implementation. The legacy SyncClipboard upstream server does **not**
+> implement the history API; UniClipboard servers do.
 
 ### 2.1 `GET SyncClipboard.json` — pull current clipboard state
 
@@ -114,6 +126,229 @@ Uploads the binary payload referred to by a Clipboard JSON whose `hasData` is
   - `401` — auth failure
   - `404` — payload missing (this is a server inconsistency: metadata says
     `hasData=true` but the file is absent — surface as an error)
+
+### 2.5 `GET /api/time` — server clock
+
+Returns the server's current wall-clock time as a string (ISO-8601 in
+practice, but the response body is parsed via `new Date(string)` so any
+form `Date` accepts is allowed). The Android client uses this to
+gate-keep the connection-test: if the local clock differs from the
+server by **more than 5 minutes**, the test fails with a "请同步系统时间"
+message — the rest of the protocol relies on `lastModified` timestamps,
+so a clock skew breaks sync.
+
+- **Method:** `GET`
+- **Path:** `/api/time`
+- **Request body:** none
+- **Response body:** ISO-8601 timestamp string, e.g.
+  `"2026-05-17T16:43:21.420Z"`
+- **Status codes:** `200` on success; `401` on auth failure; others error.
+
+### 2.6 `GET /version` — server build version
+
+Lightweight build-id endpoint. Used for the Settings → About screen and
+log diagnostics. Treat parse failures as `"Unknown"` rather than an
+error — many self-hosted servers in the wild don't implement it.
+
+- **Method:** `GET`
+- **Path:** `/version`
+- **Request body:** none
+- **Response body:** opaque short string, e.g. `"1.5.2"` or
+  `"sync-clipboard-server@2026-04"`
+- **Status codes:** `200` ok; anything else MUST be treated as
+  `"Unknown"` (don't error the call site).
+
+### 2.7 `POST /api/history/query` — list history (paginated)
+
+Returns a page of `HistoryRecord` entries (§3.6). Page-based (1-indexed);
+the server determines page size; an **empty array signals end-of-list**.
+Filters are passed as a `multipart/form-data` body — string values
+serialized as documented.
+
+- **Method:** `POST`
+- **Path:** `/api/history/query`
+- **Request `Content-Type`:** `multipart/form-data`
+- **Request body:** multipart form with any subset of these fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `page` | int as string (e.g. `"1"`) | 1-indexed page. Omit to fetch from start. |
+| `before` | ISO-8601 string | Only records with `createTime < before`. |
+| `after` | ISO-8601 string | Only records with `createTime >= after`. |
+| `modifiedAfter` | ISO-8601 string | Only records with `lastModified > modifiedAfter`. The incremental-sync primitive — clients store the highest `lastModified` they've seen and pass it on the next pull. |
+| `types` | int as string (bitmask) | Type filter. `Text=1`, `Image=2`, `File=4`, `Group=8`. Use `15` for "all", `12` for "files + groups". |
+| `searchText` | string | Server-side substring match against `text`. |
+| `starred` | `"true"` / `"false"` | Filter to starred-only when `true`. |
+| `sortByLastAccessed` | `"true"` / `"false"` | When `true`, sort by `lastAccessed` desc; otherwise `createTime` desc. |
+
+- **Response `Content-Type`:** `application/json`
+- **Response body:** `HistoryRecord[]` (§3.6). Empty array = no more pages.
+- **Status codes:** `200` success; `401`; others error.
+
+#### Pagination contract
+
+```text
+page = 1
+loop:
+    records = POST /api/history/query { page, modifiedAfter? }
+    if records.isEmpty: break
+    process(records)
+    page += 1
+```
+
+No `total` or `hasMore` field — the empty-page sentinel is the only
+end-of-list signal.
+
+### 2.8 `GET /api/history/<profileId>` — fetch one record
+
+Returns a single record by composite id. Used to dedup before
+re-uploading (§2.10) and to follow up on a successful upload.
+
+- **Method:** `GET`
+- **Path:** `/api/history/<profileId>` where
+  **`<profileId>` is the composite `"<type>-<hash>"`** (e.g.
+  `Text-3F4E62D9F184380BAD1B0F94B5518DCBF35ACB79B34F6D6E34F3DAB16CD7BC8F`).
+  The `<type>` segment is the literal capitalized type name from §3.3.
+- **Response body:** `HistoryRecord` (§3.6)
+- **Status codes:**
+  - `200` — record exists (may have `isDeleted: true`; callers MUST
+    treat soft-deleted as "absent" when deciding whether to re-upload)
+  - `401` — auth failure
+  - `404` — no record with that id
+
+> **Note on the id form** — §2.8 uses the *composite* id in the URL;
+> §2.10 (PATCH) uses a *split form* with type as its own path segment.
+> Don't try to unify the two — that's how the wire is.
+
+### 2.9 `POST /api/history` — create / re-upload a record
+
+Creates a new history record with an optional payload file. Multipart
+form combining metadata fields with a single optional file field. The
+server returns `200` on success or `409` if a record with the same
+`<type>-<hash>` already exists.
+
+- **Method:** `POST`
+- **Path:** `/api/history`
+- **Request `Content-Type`:** `multipart/form-data`
+- **Request body:** multipart form. Required fields:
+  - `hash` — uppercase hex SHA-256 (§4)
+  - `type` — `"Text"` | `"Image"` | `"File"` (Group is unsupported on
+    upload — the Flutter client doesn't produce it either, §3.3)
+
+  Optional metadata fields (string-serialized booleans / numbers):
+
+  | Field | Notes |
+  |---|---|
+  | `text` | Omit entirely when empty/whitespace-only (Android calls `isTextInvalid` before adding the field). |
+  | `createTime`, `lastModified`, `lastAccessed` | ISO-8601 strings. Default to "now" if omitted. |
+  | `starred`, `pinned`, `hasData`, `isDeleted` | `"true"` / `"false"`. |
+  | `size` | Byte length for binary, char count for text. |
+  | `version` | Optimistic-lock version. New records start at `0`. |
+
+  Plus optionally one file field whose contents are the §2.3-style
+  payload bytes when `hasData=true`. The file field name is the
+  multipart implementation's default (the Android client uses
+  `nativeUploadMultipart` which writes the file under a default `file`
+  field — confirm against your platform's multipart helper).
+
+- **Status codes:**
+  - `200` / `201` — created. Caller follows up with `GET §2.8` to
+    retrieve the canonical server copy (the upload response body is
+    ignored by Android).
+  - `401` — auth failure
+  - `409` — a record with the same `<type>-<hash>` already exists. The
+    response body is the server's current `HistoryRecord` so the client
+    can rebase. Map to a `SyncConflictError`-equivalent.
+
+### 2.10 `PATCH /api/history/<type>/<hash>` — update record (star, pin, soft-delete, version bump)
+
+Optimistic-locking partial update. The path uses the **split form** —
+`<type>` as a path segment and the bare `<hash>` (without the
+`<type>-` prefix) as the next segment.
+
+- **Method:** `PATCH`
+- **Path:** `/api/history/<type>/<hash>` — e.g.
+  `/api/history/Text/3F4E62D9F184380BAD1B0F94B5518DCBF35ACB79B34F6D6E34F3DAB16CD7BC8F`
+- **Request `Content-Type`:** `application/json`
+- **Request body:** subset of:
+
+  ```jsonc
+  {
+    "starred":      true,                                // optional
+    "pinned":       false,                               // optional
+    "isDelete":     true,                                // optional, soft-delete — NOTE: "isDelete", not "isDeleted"
+    "version":      3,                                   // optional, the client-known version
+    "lastModified": "2026-05-17T16:43:21.420Z",          // optional
+    "lastAccessed": "2026-05-17T16:43:21.420Z"           // optional
+  }
+  ```
+
+  > ⚠️ **Naming inconsistency to memorize:** the *read* shape (§3.6)
+  > and the *create* form (§2.9) use **`isDeleted`** (past participle).
+  > The *update* JSON uses **`isDelete`** (verb form, no `d`). This
+  > looks like a typo in the server contract but is load-bearing —
+  > sending `isDeleted` here is silently ignored.
+
+- **Response body:** the server's updated `HistoryRecord` (§3.6),
+  including the bumped `version` and refreshed timestamps.
+- **Status codes:**
+  - `200` — applied
+  - `401` — auth failure
+  - `404` — no record at that id (map to "record not found")
+  - `409` — version conflict. Body is the server's current record;
+    client SHOULD reload, re-apply the update on top of the new
+    version, and retry.
+
+### 2.11 `GET /api/history/<profileId>/data` — download record payload
+
+Streams the raw bytes for a history record's attached payload. Same
+semantics as §2.4 but bound to a specific historical record (not the
+"current" pointer).
+
+- **Method:** `GET`
+- **Path:** `/api/history/<profileId>/data` where `<profileId>` is the
+  composite `"<type>-<hash>"` (same form as §2.8 — NOT §2.10's split).
+- **Response body:** raw bytes
+- **Status codes:** `200` / `401` / `404`. Mirrors §2.4.
+
+### 2.12 `GET /api/history/statistics` — usage counters
+
+Optional dashboard endpoint. Returns counts/totals for the entire
+history store under the authenticated user.
+
+- **Method:** `GET`
+- **Path:** `/api/history/statistics`
+- **Response `Content-Type`:** `application/json`
+- **Response body:**
+
+  ```jsonc
+  {
+    "totalCount":      1024,    // includes soft-deleted
+    "starredCount":    42,
+    "deletedCount":    18,      // count of records with isDeleted=true
+    "activeCount":     1006,    // totalCount - deletedCount
+    "totalFileSizeMB": 3.7
+  }
+  ```
+
+- **Status codes:** `200` success; `401`; others error.
+
+### 2.13 Endpoint summary
+
+| # | Method | Path | Notes |
+|---|---|---|---|
+| 2.1 | GET    | `SyncClipboard.json` | current clipboard metadata |
+| 2.2 | PUT    | `SyncClipboard.json` | publish current clipboard |
+| 2.3 | PUT    | `file/<name>` | upload payload bytes |
+| 2.4 | GET    | `file/<name>` | download payload bytes |
+| 2.5 | GET    | `/api/time` | server clock |
+| 2.6 | GET    | `/version` | server build version |
+| 2.7 | POST   | `/api/history/query` | paginated history list (multipart filters) |
+| 2.8 | GET    | `/api/history/<type>-<hash>` | one record (composite id) |
+| 2.9 | POST   | `/api/history` | create/re-upload record (multipart) |
+| 2.10 | PATCH  | `/api/history/<type>/<hash>` | partial update (split id) |
+| 2.11 | GET    | `/api/history/<type>-<hash>/data` | record's payload bytes |
+| 2.12 | GET    | `/api/history/statistics` | counters |
 
 ---
 
@@ -199,6 +434,59 @@ For an entry with `hasData=true`:
 If step 1 fails, step 2 MUST NOT be attempted. There is no transaction; an
 implementation that crashes between (1) and (2) leaves an orphan file on the
 server, which is harmless (it will be overwritten on next publish).
+
+### 3.6 `HistoryRecord` JSON schema
+
+The shape returned by §2.7 / §2.8 / §2.10 and accepted (in multipart
+form, not JSON) by §2.9. Like `Clipboard`, missing/unknown fields MUST
+be tolerated.
+
+```jsonc
+{
+  "hash":         "SHA256-UPPER-HEX",        // required, §4
+  "type":         "Text" | "Image" | "File", // required (no "Group" in practice)
+  "text":         "string",                  // optional preview; absent or empty when content is purely binary
+  "hasData":      true | false,              // true ⇔ a payload file is downloadable via §2.11
+  "size":         1234,                      // optional, same semantics as Clipboard.size (§3.2)
+  "createTime":   "2026-05-17T16:43:00.000Z",// optional, ISO-8601 (server may default to "now")
+  "lastModified": "2026-05-17T16:43:21.420Z",// optional, used for incremental sync (§2.7 modifiedAfter)
+  "lastAccessed": "2026-05-17T16:43:21.420Z",// optional, when this record was last surfaced/applied
+  "starred":      false,                     // optional, user-marked favorite
+  "pinned":       false,                     // optional, user-pinned (sticks to the top)
+  "version":      3,                         // optional, server-side optimistic-lock version
+  "isDeleted":    false                      // optional, soft-delete tombstone (treat as absent for sync)
+}
+```
+
+The composite **`profileId`** used in URL paths (§2.8, §2.11) is
+`"<type>-<hash>"`. Despite the name `Hash`, the composite id IS what
+addresses a record on the server.
+
+#### Lifecycle and version
+
+- A record is created via §2.9 with `version: 0`.
+- Every successful §2.10 PATCH increments the server's stored `version`
+  by 1 and refreshes `lastModified`. The client MUST send the version
+  it observed (its rebase point) — the server rejects a stale version
+  with `409` and includes the current record in the response body.
+- Soft delete is a §2.10 PATCH with `"isDelete": true` (the
+  no-`d` variant — see §2.10). A soft-deleted record is still returned
+  by §2.7 / §2.8 with `isDeleted: true`; clients SHOULD treat it as
+  absent when deciding whether to re-upload via §2.9 (Android's
+  reference: `SyncClipboardClient.putContent` re-uploads if the existing
+  record has `isDeleted=true`).
+
+#### Composite-id field-name discipline
+
+| Context | Field name |
+|---|---|
+| Read response (§2.7 / §2.8 / §2.10 reply) | `isDeleted` |
+| §2.9 multipart upload | `isDeleted` |
+| §2.10 PATCH JSON body | `isDelete` (no trailing `d`) |
+
+This asymmetry is not a documentation typo — sending the wrong key on a
+PATCH is silently ignored, which is how UniClipboard-server contracts
+the operation. Wrap it in a helper so call sites can't get it wrong.
 
 ---
 
@@ -512,8 +800,15 @@ Recommended message mapping (mirrors `_handleDioException` in
 | HTTP 404 on `file/<name>` | "Payload `<name>` not found on server" |
 | Other `4xx` | "Server returned HTTP `<code>`" |
 | Other `5xx` | "Server error `<code>`" |
+| HTTP 404 on `/api/history/<id>` | "History record not found" — map to `RecordNotFound` so callers can distinguish "exists but soft-deleted" from "never existed" |
+| HTTP 409 on `POST /api/history` or `PATCH /api/history/...` | "History record version conflict" — surface as `SyncConflict` carrying the server's current record (response body) so the caller can rebase |
+| Time skew detected during connection test (§2.5) | "服务器与本地时间差距过大，请同步系统时间" — block the test before any further API call |
 
 Authentication failures (`401`) MUST NOT trigger automatic retries.
+Version conflicts (`409`) on PATCH SHOULD trigger an automatic
+read-modify-retry (one round); on POST they indicate "already exists"
+and the client SHOULD treat that as a successful upload of an
+idempotent record.
 
 ---
 
@@ -552,3 +847,25 @@ Use this list when porting to iOS. Each item maps directly to a section above.
       and use the **same keys** inside the suite.
 - [ ] Legacy `server_config` migration if you ship an Android→iOS export
       flow (§5.5).
+- [ ] History API client (§2.7 – §2.12) — separate from the live-clipboard
+      path. Build the multipart-form bodies for §2.7 and §2.9 via
+      `URLSession`'s upload task with a hand-rolled `multipart/form-data`
+      body (or a tiny helper); the JSON-encoder path won't work.
+- [ ] Composite vs split id discipline (§3.6): use composite
+      `<type>-<hash>` for §2.8 / §2.11 GETs, split `<type>/<hash>` for
+      §2.10 PATCH. Wrap both URL builders so call sites never construct
+      paths by hand.
+- [ ] `isDelete` vs `isDeleted` discipline (§3.6 / §2.10): one type for
+      reads + creates (`isDeleted`), a different field name for PATCH
+      bodies (`isDelete`). Encode both in your `Codable` types via
+      `CodingKeys` rather than a single property reused across contexts.
+- [ ] Incremental history pull loop (§2.7): page-based, 1-indexed,
+      `modifiedAfter` for delta; store the highest `lastModified` seen
+      across the merged page set as the next watermark; empty page →
+      stop.
+- [ ] Optimistic-lock retry (§2.10): on `409`, decode the response body
+      as the server's `HistoryRecord`, re-apply the local mutation on
+      top of the returned `version`, retry once. If the second attempt
+      also `409`s, surface as a sync error.
+- [ ] Time-skew gate (§2.5): the connection-test SHOULD pull
+      `/api/time` and fail the test if `|local - server| > 5 min`.
