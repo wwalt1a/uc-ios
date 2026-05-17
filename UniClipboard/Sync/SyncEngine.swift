@@ -48,6 +48,12 @@ final class SyncEngine {
         case hasNewUnwritten
         case offlineRetrying
         case authFailed
+        /// Apply/Push of the same hash flipped too many times inside the
+        /// `SyncLoopGuard` window — the loop is suspended until the user
+        /// acknowledges via `acknowledgeLoopDetection()`. Set anywhere we
+        /// advance `lastAppliedContentHash` / `lastPushedContentHash` and
+        /// `loopGuard.tripped()` returns true.
+        case loopDetected
     }
 
     private(set) var state: State = .idle
@@ -74,6 +80,22 @@ final class SyncEngine {
 
     @ObservationIgnored
     private var lastSyncedContentHash: String?
+
+    /// The hash we most recently *wrote to UIPasteboard* via apply. Tracked
+    /// separately from `lastSyncedContentHash` so the push gate has a
+    /// second line of defense: even if some downstream layer (basename
+    /// canonicalization, iOS pasteboard re-encoding) reports the device
+    /// hash slightly differently from the server hash we just applied,
+    /// `maybePush` won't push the freshly-applied content back. Cleared
+    /// (along with `lastSyncedContentHash`) when the active server flips.
+    @ObservationIgnored
+    private var lastAppliedContentHash: String?
+
+    /// Cycle detector. Records every apply / push and trips when the same
+    /// hash flips direction too many times — see `SyncLoopGuard` for the
+    /// state machine.
+    @ObservationIgnored
+    private var loopGuard = SyncLoopGuard()
 
     /// Hash we already downloaded but didn't write. Used to dedup the bytes
     /// fetch when auto-apply is off and the server hash hasn't changed.
@@ -123,10 +145,14 @@ final class SyncEngine {
 
     /// Begin the polling loop. Idempotent — calling while already running
     /// is a no-op. Call from `scenePhase == .active`. Resets `.authFailed`
-    /// on the assumption that the caller is retrying after a credential fix.
+    /// on the assumption that the caller is retrying after a credential
+    /// fix. Does NOT reset `.loopDetected` — that one requires explicit
+    /// user acknowledgment via `acknowledgeLoopDetection()`, otherwise the
+    /// next scene-phase flip would silently re-enter the loop.
     func start() {
         guard loopTask == nil else { return }
         if state == .authFailed { state = .idle }
+        if state == .loopDetected { return }
         loopTask = Task { @MainActor [weak self] in
             while let self, !Task.isCancelled {
                 await self.tick()
@@ -168,11 +194,24 @@ final class SyncEngine {
     func markStagedApplied() {
         guard let hash = stagedServerHash else { return }
         advanceSynced(to: hash)
+        lastAppliedContentHash = hash.uppercased()
         stagedServerHash = nil
         stagedEntry = nil
         state = .succeeded
         lastSyncedAt = .now
         lastError = nil
+    }
+
+    /// User-side dismissal of the loop-detected banner. Wipes the cycle
+    /// detector's buffer so the next legitimate sync doesn't re-trip
+    /// instantly, drops back to `.idle`, and restarts the loop. Safe to
+    /// call when the state isn't `.loopDetected` — clears the buffer and
+    /// restarts as a defensive no-op.
+    func acknowledgeLoopDetection() {
+        loopGuard.reset()
+        state = .idle
+        lastError = nil
+        start()
     }
 
     /// Clear runtime state without touching persisted hash. Useful when the
@@ -181,6 +220,8 @@ final class SyncEngine {
     func resetRuntimeState() {
         stagedServerHash = nil
         stagedEntry = nil
+        lastAppliedContentHash = nil
+        loopGuard.reset()
         lastError = nil
         state = .idle
         // Force the next tick to hit /api/history/query immediately —
@@ -201,12 +242,16 @@ final class SyncEngine {
         let newEffectiveId = new.resolveActiveConfig(currentSsid: ssid)?.id
         if oldEffectiveId != newEffectiveId {
             // Different server entirely — content timeline differs, drop hash.
+            // `resetRuntimeState` also clears `.loopDetected`, so we then need
+            // to restart the loop unconditionally (it was stopped when the
+            // breaker tripped).
             resetRuntimeState()
             lastSyncedContentHash = nil
             store.saveLastSyncedHash(nil)
             // §2.7 watermark is per-server too — clear it so the next
             // tick pulls the new server's full history page by page.
             viewModel?.historyWatermark = nil
+            start()
         }
         if state == .authFailed {
             // The user almost certainly just edited credentials. Restart and
@@ -230,9 +275,15 @@ final class SyncEngine {
         // §2.7 watermark is per-server. Also clear it so the new server's
         // first history pull is unfiltered.
         viewModel?.historyWatermark = nil
+        // Restart the loop unconditionally — `resetRuntimeState` already
+        // cleared `.loopDetected`, and `start()` is a no-op if the loop is
+        // already running. `forceTickNow` alone wouldn't be enough: when
+        // the breaker had tripped the loopTask is nil, so we need start()
+        // to revive the cadence.
         if state == .authFailed {
             start()
         } else {
+            start()
             forceTickNow()
         }
     }
@@ -240,6 +291,7 @@ final class SyncEngine {
     private func cadenceSeconds() -> Double {
         switch state {
         case .authFailed:       return .infinity
+        case .loopDetected:     return .infinity
         case .offlineRetrying:  return offlineBackoffSeconds
         default:                return normalCadenceSeconds
         }
@@ -258,7 +310,18 @@ final class SyncEngine {
             state = .idle
             return
         }
-        if state == .authFailed { return }
+        if state == .authFailed || state == .loopDetected { return }
+        // Cross-process re-sync: the Share Extension writes
+        // `lastSyncedContentHash` directly into the App Group when it
+        // finishes a push (see CLAUDE.md "Share Extension write
+        // coordination"). Without re-reading here, the engine's in-memory
+        // copy from `init` is stale and the next tick would re-apply the
+        // just-shared entry back onto the device — the exact ping-pong
+        // that the coordination key was meant to prevent.
+        let persisted = store.loadLastSyncedHash()
+        if !hashesEqual(persisted, lastSyncedContentHash) {
+            lastSyncedContentHash = persisted?.uppercased()
+        }
         // Note: routine 1Hz ticks don't transition to a "syncing"
         // intermediate state — the visible `state` stays at its last
         // stable value, so the connector strip doesn't flicker every
@@ -328,11 +391,14 @@ final class SyncEngine {
                 throw err
             }
             advanceSynced(to: entry.hash)
+            lastAppliedContentHash = entry.hash?.uppercased()
             stagedServerHash = nil
             stagedEntry = nil
             state = .succeeded
             lastSyncedAt = .now
             lastError = nil
+            loopGuard.record(.pulled, hash: entry.hash)
+            if loopGuard.tripped() { tripLoopBreaker() }
         } else {
             // Stage but don't write. Update stagedServerHash to dedup next
             // tick. lastSyncedContentHash stays where it was — until the
@@ -366,6 +432,21 @@ final class SyncEngine {
             lastError = nil
             return
         }
+        if hashesEqual(device.hash, lastAppliedContentHash) {
+            // Defense (B): the freshly-applied entry IS what's on the
+            // pasteboard right now — but observer.current's hash might
+            // disagree with `lastSyncedContentHash` because of basename
+            // canonicalization (e.g., server's dataName="photo.heif" got
+            // re-snapshotted as the priority-list canonical "image.heic",
+            // changing the §4.2 basename-bound hash). Treat this as
+            // already synced and DON'T push the device version back; doing
+            // so would echo the server's content back to the server under
+            // a different basename and start the apply↔push pong.
+            state = .succeeded
+            lastSyncedAt = .now
+            lastError = nil
+            return
+        }
         // `vm.push()` early-returns silently if the pasteboard snapshot
         // is nil or has an unpushable type — in that case nothing
         // network-side happened, but `vm.serverLatest` is still the
@@ -380,6 +461,8 @@ final class SyncEngine {
         if vm.lastPushedAt != prePushedAt, let pushed = vm.serverLatest {
             advanceSynced(to: pushed.hash)
             vm.appendHistory(entry: pushed, direction: .pushed)
+            loopGuard.record(.pushed, hash: pushed.hash)
+            if loopGuard.tripped() { tripLoopBreaker() }
             // Mirror the Share Extension's donation so iOS Sharing
             // Suggestions ranks this server higher even when the user
             // never explicitly invokes the share sheet — auto-sync
@@ -446,6 +529,19 @@ final class SyncEngine {
         if maxModified > (watermark ?? .distantPast) {
             vm.historyWatermark = maxModified
         }
+    }
+
+    /// Park the engine in `.loopDetected` and stop the polling loop.
+    /// Idempotent — re-entering the trip path while already tripped is a
+    /// no-op. Recovery is `acknowledgeLoopDetection()` from the UI.
+    private func tripLoopBreaker() {
+        guard state != .loopDetected else { return }
+        state = .loopDetected
+        lastError = SyncError(
+            kind: .networkUnreachable,
+            underlying: "auto-sync loop detected — same content alternated apply/push too many times"
+        )
+        stop()
     }
 
     private func hashesEqual(_ a: String?, _ b: String?) -> Bool {

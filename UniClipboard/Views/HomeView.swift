@@ -91,9 +91,10 @@ struct HomeView: View {
                         onPrimaryAction: {
                             showingErrorSheet = false
                             switch issue.primaryAction {
-                            case .goToSettings: onGoToSettings()
-                            case .retry:        vm.engine.forceTickNow()
-                            case .dismiss:      break
+                            case .goToSettings:    onGoToSettings()
+                            case .retry:           vm.engine.forceTickNow()
+                            case .acknowledgeLoop: vm.engine.acknowledgeLoopDetection()
+                            case .dismiss:         break
                             }
                         }
                     )
@@ -265,6 +266,8 @@ struct HomeView: View {
                 return .offline(message: errorMessage(err), detail: err.underlying)
             }
             return .offline(message: String(localized: "离线 · 重试中"), detail: nil)
+        case .loopDetected:
+            return .loopDetected(detail: vm.engine.lastError?.underlying)
         case .idle, .succeeded, .hasNewUnwritten:
             return nil
         }
@@ -523,33 +526,41 @@ private enum HomeIssue: Equatable {
     case authFailed(detail: String?)
     case offline(message: String, detail: String?)
     case saveFailed(message: String, detail: String?)
+    /// Cycle-detector tripped: the engine paused itself because the same
+    /// clipboard hash was being applied and pushed in alternation. Primary
+    /// action calls `engine.acknowledgeLoopDetection()` to reset the
+    /// breaker and restart the loop.
+    case loopDetected(detail: String?)
 
     enum PrimaryAction {
         case goToSettings
         case retry
+        case acknowledgeLoop
         case dismiss
     }
 
     var tint: Color {
         switch self {
-        case .authFailed, .saveFailed: .red
-        case .offline:                 .orange
+        case .authFailed, .saveFailed:    .red
+        case .offline, .loopDetected:     .orange
         }
     }
 
     var symbolName: String {
         switch self {
-        case .authFailed: "lock.fill"
-        case .offline:    "wifi.exclamationmark"
-        case .saveFailed: "exclamationmark.triangle.fill"
+        case .authFailed:    "lock.fill"
+        case .offline:       "wifi.exclamationmark"
+        case .saveFailed:    "exclamationmark.triangle.fill"
+        case .loopDetected:  "arrow.triangle.2.circlepath"
         }
     }
 
     var title: String {
         switch self {
-        case .authFailed: String(localized: "认证失败")
-        case .offline:    String(localized: "无法连接服务器")
-        case .saveFailed: String(localized: "保存失败")
+        case .authFailed:    String(localized: "认证失败")
+        case .offline:       String(localized: "无法连接服务器")
+        case .saveFailed:    String(localized: "保存失败")
+        case .loopDetected:  String(localized: "自动同步已暂停")
         }
     }
 
@@ -561,29 +572,33 @@ private enum HomeIssue: Equatable {
             message
         case .saveFailed(let message, _):
             message
+        case .loopDetected:
+            String(localized: "检测到同一份剪贴板内容在本机和服务器之间反复同步。点「重新启用」继续，或检查另一端的客户端是否也在自动同步同一份内容。")
         }
     }
 
     var detail: String? {
         switch self {
-        case .authFailed(let d), .offline(_, let d), .saveFailed(_, let d):
+        case .authFailed(let d), .offline(_, let d), .saveFailed(_, let d), .loopDetected(let d):
             d
         }
     }
 
     var primaryAction: PrimaryAction {
         switch self {
-        case .authFailed: .goToSettings
-        case .offline:    .retry
-        case .saveFailed: .dismiss
+        case .authFailed:    .goToSettings
+        case .offline:       .retry
+        case .saveFailed:    .dismiss
+        case .loopDetected:  .acknowledgeLoop
         }
     }
 
     var primaryActionLabel: LocalizedStringKey {
         switch self {
-        case .authFailed: "去设置"
-        case .offline:    "立即重试"
-        case .saveFailed: "好"
+        case .authFailed:    "去设置"
+        case .offline:       "立即重试"
+        case .saveFailed:    "好"
+        case .loopDetected:  "重新启用"
         }
     }
 }

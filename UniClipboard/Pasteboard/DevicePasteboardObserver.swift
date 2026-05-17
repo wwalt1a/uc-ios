@@ -58,6 +58,19 @@ final class DevicePasteboardObserver {
     @ObservationIgnored
     private var lastWriteChangeCount: Int = -1
 
+    /// Content hash of the most recent value we wrote to `UIPasteboard`,
+    /// uppercase. Secondary echo guard: when changeCount drifts past
+    /// `lastWriteChangeCount` (an unrelated process bumped the pasteboard,
+    /// iOS posted an extra notification, etc.) we re-snapshot — but if
+    /// the snapshot's §4.1/§4.2 hash matches `lastWrittenContentHash`,
+    /// the bytes are still ours and we suppress the read. Without this,
+    /// the apply path can re-snapshot to a Clipboard with a slightly
+    /// different §4.2 basename (because `imageUTIPriority` canonicalizes
+    /// to `image.<ext>`), and that re-snapshotted hash drives a spurious
+    /// push that pings back as the next pull — the apply↔push pong.
+    @ObservationIgnored
+    private var lastWrittenContentHash: String?
+
     /// Gate that defers the first live `UIPasteboard.general` access until
     /// the UI explicitly calls `activate()`. Without this, the observer
     /// reads at init (and again on `didBecomeActiveNotification` during the
@@ -104,9 +117,13 @@ final class DevicePasteboardObserver {
         case .live:
             UIPasteboard.general.string = text
             lastWriteChangeCount = UIPasteboard.general.changeCount
-            current = Clipboard.publishText(text).clipboard
+            let adopted = Clipboard.publishText(text).clipboard
+            lastWrittenContentHash = adopted.hash?.uppercased()
+            current = adopted
         case .forceNil, .forceText, .forceImage:
-            current = Clipboard.fromText(text)
+            let adopted = Clipboard.fromText(text)
+            lastWrittenContentHash = adopted.hash?.uppercased()
+            current = adopted
         }
     }
 
@@ -133,6 +150,14 @@ final class DevicePasteboardObserver {
             dataName: name,
             size: data.count
         )
+        // Also stash the canonical-basename hash that `liveSnapshot` would
+        // compute when re-reading. UIPasteboard discards basename, so the
+        // re-snap always lands on `image.<ext>` — that hash is the one
+        // the echo guard needs to compare against. If they're already
+        // equal (originalName already in canonical form, or text path),
+        // this is the same as adopted.hash.
+        let canonicalBasename = "image.\(Self.ext(forUTI: uti))"
+        let canonicalHash = Clipboard.computeFileHash(name: canonicalBasename, bytes: data)
         switch envMode {
         case .live:
             UIPasteboard.general.setData(data, forPasteboardType: uti)
@@ -140,6 +165,7 @@ final class DevicePasteboardObserver {
         case .forceNil, .forceText, .forceImage:
             break
         }
+        lastWrittenContentHash = canonicalHash.uppercased()
         current = adopted
     }
 
@@ -153,13 +179,35 @@ final class DevicePasteboardObserver {
     /// for that write and `current` is already the adopted entry — bail
     /// out so we don't re-canonicalize basename. External copies advance
     /// changeCount further and fall through to the fresh read.
+    ///
+    /// Secondary hash-equivalence echo guard: when changeCount has drifted
+    /// past `lastWriteChangeCount` (an unrelated process bumped the
+    /// pasteboard, iOS posted an extra notification, …) we re-snapshot
+    /// — but if the snapshot's hash matches `lastWrittenContentHash`,
+    /// the bytes are still ours and any further mutation of `current`
+    /// would discard the server's `dataName` binding we just adopted.
+    /// Keep `current` as-is so the SyncEngine's apply-vs-push gate stays
+    /// stable.
     func read() {
         guard isActive else { return }
         if case .live = envMode,
            UIPasteboard.general.changeCount == lastWriteChangeCount {
             return
         }
-        current = snapshot()?.clipboard
+        guard let snap = snapshot()?.clipboard else {
+            current = nil
+            return
+        }
+        if let written = lastWrittenContentHash,
+           let snapHash = snap.hash?.uppercased(),
+           written == snapHash {
+            // Echo (delayed / out-of-order notification, or external
+            // changeCount bump). Don't overwrite `current` — it still
+            // carries the server-side basename binding the SyncEngine
+            // needs for its dedup.
+            return
+        }
+        current = snap
     }
 
     /// Bytes-fresh read. Returns the current pasteboard contents as a

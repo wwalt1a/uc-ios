@@ -1211,6 +1211,39 @@
           }
         }
       }
+    },
+    "自动同步已暂停" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-sync paused"
+          }
+        }
+      }
+    },
+    "重新启用" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Re-enable"
+          }
+        }
+      }
+    },
+    "检测到同一份剪贴板内容在本机和服务器之间反复同步。点「重新启用」继续，或检查另一端的客户端是否也在自动同步同一份内容。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The same clipboard content kept bouncing between this device and the server. Tap Re-enable to continue, or check whether another client is also auto-syncing the same content."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
