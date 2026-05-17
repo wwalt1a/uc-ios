@@ -221,7 +221,12 @@ final class AppViewModel {
             return
         }
         guard Clipboard.hashMatches(expected: entry.hash, actual: actual) else {
-            throw SyncError(kind: .hashMismatch)
+            let expected = entry.hash ?? "<nil>"
+            let name = entry.dataName ?? "<nil>"
+            throw SyncError(
+                kind: .hashMismatch,
+                underlying: "expected=\(expected) actual=\(actual) name=\(name) bytes=\(bytes.count)"
+            )
         }
     }
 

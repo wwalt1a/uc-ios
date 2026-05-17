@@ -77,13 +77,23 @@ struct HomeView: View {
 
     @ViewBuilder
     private func errorRow(_ err: SyncError, prefix: String) -> some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
-            Text(prefix.isEmpty ? errorMessage(err) : "\(prefix) \(errorMessage(err))")
-                .font(.footnote)
-                .foregroundStyle(.primary)
-                .lineLimit(2)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(prefix.isEmpty ? errorMessage(err) : "\(prefix) \(errorMessage(err))")
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                if let detail = err.underlying, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(4)
+                        .textSelection(.enabled)
+                }
+            }
             Spacer()
         }
         .padding(.horizontal, 12)
