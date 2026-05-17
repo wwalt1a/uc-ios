@@ -424,36 +424,40 @@ private struct ClipboardRow: View {
 
 // MARK: - Inline banners
 
-/// "服务器有新内容,未自动写入本机" — pinned above the list so the user
-/// can dismiss it by tapping "应用". Sits inside the same scroll surface
-/// (safeAreaInset) so it doesn't visually orphan from the list.
+/// Inset rounded card pinned above the list when the engine has unwritten
+/// server content. Tapping "应用" pushes it into UIPasteboard. Sits inside
+/// the same scroll surface (safeAreaInset) so it scrolls with the list
+/// instead of orphaning at the top of the screen.
 private struct PendingBanner: View {
     let onApply: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "tray.and.arrow.down.fill")
-                .font(.footnote.weight(.semibold))
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.title3)
                 .foregroundStyle(.indigo)
-            Text("服务器有新内容,未自动写入本机")
-                .font(.footnote.weight(.medium))
+            Text("服务器有新内容")
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.primary)
-                .lineLimit(2)
+                .lineLimit(1)
             Spacer(minLength: 8)
             Button(action: onApply) {
                 Text("应用")
-                    .font(.footnote.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .tint(.indigo)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            Color.indigo.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.regularMaterial)
-        .overlay(alignment: .bottom) {
-            Divider().opacity(0.4)
-        }
+        .padding(.top, 8)
+        .padding(.bottom, 4)
     }
 }
 
