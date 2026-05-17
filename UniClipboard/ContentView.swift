@@ -17,7 +17,7 @@ struct ContentView: View {
         guard let i = ProcessInfo.processInfo.environment["UC_INIT_TAB"].flatMap(Int.init) else {
             return 0
         }
-        return max(0, min(2, i))
+        return max(0, min(1, i))
     }
 
     var body: some View {
@@ -35,15 +35,10 @@ struct ContentView: View {
         TabView(selection: $selection) {
             Tab("剪贴板", systemImage: "doc.on.clipboard.fill", value: 0) {
                 NavigationStack {
-                    HomeView(vm: vm, onGoToSettings: { selection = 2 })
+                    HomeView(vm: vm, onGoToSettings: { selection = 1 })
                 }
             }
-            Tab("历史", systemImage: "clock.fill", value: 1) {
-                NavigationStack {
-                    HistoryView()
-                }
-            }
-            Tab("设置", systemImage: "gearshape.fill", value: 2) {
+            Tab("设置", systemImage: "gearshape.fill", value: 1) {
                 NavigationStack(path: $settingsPath) {
                     SettingsView(vm: vm, path: $settingsPath)
                 }
@@ -64,6 +59,31 @@ struct ContentView: View {
             }
             if env["UC_AUTO_SAVE"] == "1" {
                 await vm.saveServerAttachment()
+            }
+            // §2.11 regression hook: after the first history-sync wave
+            // populates `vm.history`, save the first image/file entry
+            // via the history endpoint. Sleep is intentional — simctl
+            // recipes have no way to observe `vm.history` mutations,
+            // so a small grace window beats polling here.
+            if env["UC_AUTO_SAVE_HISTORY"] == "1" {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if let target = vm.history.first(where: {
+                    $0.entry.hasData && ($0.entry.type == .image || $0.entry.type == .file)
+                }) {
+                    await vm.saveAttachment(for: target)
+                }
+            }
+            // §2.11 + UIPasteboard regression hook: same grace window
+            // as save, but targets an image-type history row and writes
+            // back to the device pasteboard. file-type rows aren't valid
+            // — `applyAttachment` rejects them.
+            if env["UC_AUTO_APPLY_HISTORY"] == "1" {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if let target = vm.history.first(where: {
+                    $0.entry.hasData && $0.entry.type == .image
+                }) {
+                    await vm.applyAttachment(for: target)
+                }
             }
         }
         .onChange(of: scenePhase) { _, newPhase in

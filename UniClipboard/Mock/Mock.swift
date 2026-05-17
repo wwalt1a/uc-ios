@@ -1,15 +1,5 @@
 import Foundation
 
-/// One row in the History tab — a Clipboard entry with provenance.
-struct ClipboardHistoryItem: Identifiable, Hashable {
-    enum Direction: Hashable { case pulled, pushed }
-
-    let id = UUID()
-    var entry: Clipboard
-    var timestamp: Date
-    var direction: Direction
-}
-
 /// In-memory fake state used while we iterate on the UI. Replace the source of
 /// `Mock.servers` / `Mock.serverLatest` / `Mock.deviceClipboard` / `Mock.history`
 /// with the real network + UserDefaults layer once the visual design is locked.
@@ -108,6 +98,18 @@ enum Mock {
         ),
         ClipboardHistoryItem(
             entry: Clipboard(
+                type: .image,
+                hash: "D6E5F40312AA98876543210FEDCBA987654321FEDCBA9876543210FEDCBA9876",
+                text: "design_review.png",
+                hasData: true,
+                dataName: "design_review.png",
+                size: 268_435
+            ),
+            timestamp: .now.addingTimeInterval(-2 * 86400),
+            direction: .pushed
+        ),
+        ClipboardHistoryItem(
+            entry: Clipboard(
                 type: .group,
                 hash: "C9D8E7F605142332A1B0C9D8E7F60514233241506A7B8C9DAEBFC0D1E2F30415",
                 text: "screenshots.zip",
@@ -115,7 +117,7 @@ enum Mock {
                 dataName: "screenshots.zip",
                 size: 5_242_880
             ),
-            timestamp: .now.addingTimeInterval(-2 * 86400),
+            timestamp: .now.addingTimeInterval(-4 * 86400),
             direction: .pulled
         ),
         ClipboardHistoryItem(
@@ -124,7 +126,7 @@ enum Mock {
                 text: "publisher omitted hash; receivers must treat as 'matches anything'",
                 hasData: false
             ),
-            timestamp: .now.addingTimeInterval(-5 * 86400),
+            timestamp: .now.addingTimeInterval(-10 * 86400),
             direction: .pulled
         ),
     ]

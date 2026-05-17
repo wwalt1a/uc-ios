@@ -60,12 +60,14 @@ Pass per-launch env via `SIMCTL_CHILD_<NAME>=value` exported in the shell callin
 
 | Env | Effect |
 |---|---|
-| `UC_INIT_TAB=0\|1\|2` | Start on Clipboard / History / Settings tab |
+| `UC_INIT_TAB=0\|1` | Start on Clipboard / Settings tab |
 | `UC_FRESH=1` | Boot with empty `ServerConfigList` → forces SetupFlow |
 | `UC_SETUP_STEP=form\|autoswitch` | Bootstrap Setup `NavigationStack` path directly to that step |
 | `UC_PREFILL=1` | Prefill ServerForm fields with mock defaults |
 | `UC_PREFILL_TEST=success\|authFailed\|unreachable\|missingFields` | Seed ServerForm test-connection result on appear |
 | `UC_OPEN_SWITCHER=1` | Auto-present the ServerSwitcher sheet on Home (simctl has no synthetic-tap, so this is how the sheet gets screenshotted) |
+| `UC_AUTO_SAVE_HISTORY=1` | After 3s grace window, save the first `image`/`file` entry in `vm.history` via §2.11. Companion to `UC_AUTO_SAVE`, which only covers the live-latest §2.4 path. |
+| `UC_AUTO_APPLY_HISTORY=1` | After 3s grace window, apply the first `image` entry in `vm.history` to `UIPasteboard.general` via §2.11. File-type rows can't be applied (no meaningful UTI). |
 
 These hooks are only present so the design can be inspected without an interactive simulator (simctl has no synthetic-tap API). Not feature flags; remove on the day this becomes a real product.
 
@@ -136,10 +138,10 @@ UniClipboard/               # Main app target — UIKit/SwiftUI surface.
 ├── Mock/                   # In-memory fake state (servers / clipboard / history).
 ├── Views/
 │   ├── Setup/              # First-run flow (Welcome → ServerForm → AutoSwitch).
-│   └── *.swift             # HomeView, HistoryView, SettingsView, components.
+│   └── *.swift             # HomeView (grouped time-descending list), SettingsView, components.
 ├── Localizable.xcstrings   # zh-Hans source, en translation.
 ├── AppViewModel.swift      # @Observable @MainActor root view-model.
-├── ContentView.swift       # Root: SetupFlow when configs.isEmpty, else TabView.
+├── ContentView.swift       # Root: SetupFlow when configs.isEmpty, else TabView (剪贴板/设置).
 └── UniClipboard.entitlements  # App Group + wifi-info entitlement.
 
 UniClipboardShare/          # Share Extension target — receives system-share

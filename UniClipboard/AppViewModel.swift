@@ -27,6 +27,32 @@ final class AppViewModel {
     /// cold launch would mislead.
     var serverLatest: Clipboard?
 
+    /// Recent clipboard entries shown on the Home list, newest-first.
+    /// `SyncEngine` is the canonical writer — it appends a `.pulled` entry
+    /// on each successful server fetch with new content (§2.1) and a
+    /// `.pushed` entry on each successful publish (§2.2). Persisted to
+    /// the App Group via `SettingsStore.saveHistory` on every mutation,
+    /// so cold launches recover the same list the user just saw.
+    /// Hydrated from disk in `init`; previews override post-init.
+    var history: [ClipboardHistoryItem] = [] {
+        didSet { store.saveHistory(history) }
+    }
+
+    /// Cap kept on `history` to bound the persisted JSON size and the
+    /// list-render cost. Picked empirically — 200 newest-first entries is
+    /// ~30 KB encoded and renders smoothly in `List` without virtualization
+    /// tricks. Older entries fall off when `appendHistory` grows past it.
+    private static let maxHistoryCount = 200
+
+    /// Incremental-sync watermark for §2.7 `POST /api/history/query`. The
+    /// largest `lastModified` seen on any prior page; passed back as
+    /// `modifiedAfter` so the server only returns strictly newer records.
+    /// `nil` triggers a full pull on the next sync (cold-launch state, or
+    /// after switching servers). Persisted as ISO-8601 via `SettingsStore`.
+    var historyWatermark: Date? {
+        didSet { store.saveHistoryWatermark(historyWatermark) }
+    }
+
     /// When `serverLatest` was last refreshed (success or 404). Reset on
     /// every `refresh()` outcome so the UI's "5 minutes ago" label tracks
     /// reality.
@@ -67,6 +93,12 @@ final class AppViewModel {
     /// Cleared on the next refresh or save attempt so the UI's
     /// "已保存到 …" caption doesn't outlive its relevance.
     var lastSavedFileURL: URL?
+
+    /// Display name of the most-recent successful `applyAttachment(for:)`
+    /// — drives the bottom-banner "已复制 <name> 到剪贴板". Same
+    /// transient-feedback lifecycle as `lastSavedFileURL`; cleared on the
+    /// next refresh / apply / save attempt.
+    var lastAppliedAttachmentName: String?
 
     /// Current device pasteboard snapshot. Computed; the observer is the
     /// source of truth and `@Observable` propagates its `current` reads
@@ -113,6 +145,8 @@ final class AppViewModel {
         self.pasteboard = pasteboard ?? DevicePasteboardObserver()
         self.servers = forceFreshServers ? ServerConfigList() : store.loadServers()
         self.appSettings = store.loadAppSettings()
+        self.history = store.loadHistory()
+        self.historyWatermark = store.loadHistoryWatermark()
         self.ssidProvider = CurrentSSIDProvider()
         self.engine = SyncEngine(viewModel: self, store: store)
         // Drive engine state resets when a Wi-Fi flip changes the
@@ -151,6 +185,119 @@ final class AppViewModel {
     /// pull-to-refresh; foreground / pasteboard-changed notifications
     /// re-read automatically.
     func readPasteboard() { pasteboard.read() }
+
+    /// Re-copy a historical text entry back onto the device pasteboard.
+    /// The observer adopts the new value immediately, so the next
+    /// `SyncEngine` tick will publish it as the current clipboard via
+    /// `push()` (spec §2.2). Non-text entries are no-ops at this layer —
+    /// the row UI suppresses the action for those types.
+    func reapplyText(_ text: String) {
+        pasteboard.write(text: text)
+    }
+
+    /// Remove one row from the in-memory `history` list. Operates on the
+    /// stable `ClipboardHistoryItem.id` so deletion is safe across
+    /// re-sorts. The protocol has no concept of "delete from server" for
+    /// the live clipboard — the spec only keeps one record, so this is a
+    /// local-cache-only mutation today.
+    func removeHistoryItem(id: UUID) {
+        history.removeAll { $0.id == id }
+    }
+
+    /// Append a sync event to `history`. Inserted at index 0 so the
+    /// time-descending UI sort holds without re-scanning. Dedups against
+    /// the immediately-prior entry of the same direction + hash — without
+    /// this the engine's `lastSyncedContentHash` short-circuits cover the
+    /// common case but a quick toggle of auto-apply (which re-routes
+    /// through `processServerNew` with the same staged hash) would
+    /// double-log. A `nil` hash is treated as "always new" since the
+    /// publisher chose not to fingerprint, and we have nothing to dedup
+    /// against.
+    func appendHistory(entry: Clipboard, direction: ClipboardHistoryItem.Direction, at timestamp: Date = .now) {
+        if let hash = entry.hash,
+           let last = history.first,
+           last.direction == direction,
+           last.entry.hash == hash {
+            return
+        }
+        history.insert(
+            ClipboardHistoryItem(entry: entry, timestamp: timestamp, direction: direction),
+            at: 0
+        )
+        if history.count > Self.maxHistoryCount {
+            // Trim in one shot rather than removeLast() per overflow — a
+            // single replacement is one didSet write and one JSON encode,
+            // which matters when SyncEngine catches up after a long
+            // background and floods the log.
+            history = Array(history.prefix(Self.maxHistoryCount))
+        }
+    }
+
+    /// Merge one server-side `HistoryRecord` (§3.6) into the local
+    /// observation log. Idempotent — call as many times as you like with
+    /// the same record.
+    ///
+    /// Semantics:
+    /// - `isDeleted=true` tombstone → remove any local entry with the
+    ///   matching hash (case-insensitive). The spec says clients treat
+    ///   soft-deleted as absent (§3.6 lifecycle).
+    /// - Existing local entry with same hash → keep the entry but pull
+    ///   the timestamp earlier if the server's `createTime` is older
+    ///   (more accurate — `appendHistory` stamps with `.now`, which is
+    ///   close but not the actual creation moment).
+    /// - New hash → insert in the right time-descending slot so the UI
+    ///   sort holds without re-sorting; preserve the `maxHistoryCount`
+    ///   cap.
+    ///
+    /// The merged `direction` is `.pulled` — from this device's POV the
+    /// record arrived from the server. If it was originally pushed from
+    /// this device, the local `.pushed` entry already covers that case
+    /// (and the hash match above wins, so we don't double-log).
+    func mergeHistoryRecord(_ record: HistoryRecord) {
+        let normalized = record.hash.uppercased()
+        if record.isDeleted {
+            history.removeAll { ($0.entry.hash?.uppercased()) == normalized }
+            return
+        }
+        if let idx = history.firstIndex(where: { ($0.entry.hash?.uppercased()) == normalized }) {
+            let serverStamp = record.createTime ?? record.lastModified ?? history[idx].timestamp
+            history[idx].timestamp = min(history[idx].timestamp, serverStamp)
+            return
+        }
+        // §3.6 doesn't list `dataName` on HistoryRecord, but per §3.3 the
+        // `text` field on image/file types IS the basename (the same one
+        // the live-clipboard endpoint uses). Reusing it as `dataName`
+        // gives downstream save/apply code a filename without forcing a
+        // separate endpoint round-trip. For text-type records `dataName`
+        // remains nil — the text content is inline in `text`.
+        let dataName: String? = {
+            switch record.type {
+            case .image, .file, .group:
+                let t = (record.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return t.isEmpty ? nil : t
+            case .text:
+                return nil
+            }
+        }()
+        let entry = Clipboard(
+            type: record.type,
+            hash: record.hash,
+            text: record.text ?? "",
+            hasData: record.hasData,
+            dataName: dataName,
+            size: record.size
+        )
+        let timestamp = record.createTime ?? record.lastModified ?? .now
+        let item = ClipboardHistoryItem(entry: entry, timestamp: timestamp, direction: .pulled)
+        // Time-descending insert. firstIndex(where:) is O(n) but n is
+        // bounded by maxHistoryCount and we run this incrementally per
+        // record, so it's a non-issue in practice.
+        let insertIdx = history.firstIndex(where: { $0.timestamp < timestamp }) ?? history.count
+        history.insert(item, at: insertIdx)
+        if history.count > Self.maxHistoryCount {
+            history = Array(history.prefix(Self.maxHistoryCount))
+        }
+    }
 
     /// Write the active server's clipboard to the device. Text: short
     /// path writes from metadata `text`; long path downloads §2.4 payload,
@@ -207,11 +354,97 @@ final class AppViewModel {
         }
     }
 
-    /// Download an image or file server entry's payload and write it to
-    /// `Documents/<sanitized downloadRelativePath>/<dataName>`. Group
-    /// entries are out of scope this cycle (§4.3 ZIP-traversal hash is
-    /// its own slice). Overwrites on collision — matches Files-app
-    /// behavior.
+    /// Download a history row's image payload via §2.11 and write the
+    /// bytes onto the device pasteboard. Text rows use `reapplyText`
+    /// (no network round-trip), file rows are not supported — UIPasteboard
+    /// has no meaningful UTI for an arbitrary binary, and pasting a
+    /// "file" into another app is what the Files app's share sheet is
+    /// for. Group entries (§4.3) likewise out of scope.
+    ///
+    /// On success, `lastAppliedAttachmentName` is set so the home view
+    /// can surface "已复制 <name> 到剪贴板" — without that the user has
+    /// no visible feedback that the bytes landed.
+    func applyAttachment(for item: ClipboardHistoryItem) async {
+        guard !isApplying else { return }
+        let entry = item.entry
+        guard entry.hasData,
+              entry.type == .image,
+              let dataName = entry.dataName,
+              let hash = entry.hash, !hash.isEmpty,
+              let server = effectiveActiveConfig
+        else { return }
+        let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
+
+        isApplying = true
+        defer { isApplying = false }
+        // Same transient-feedback discipline as save: clear the prior
+        // banner before the new attempt so the user doesn't briefly see
+        // a stale "已保存 …" while the apply round-trip is in flight.
+        lastSavedFileURL = nil
+        lastAppliedAttachmentName = nil
+        do {
+            let client = try SyncClipboardClient(server: server, trustInsecureCert: appSettings.trustInsecureCert)
+            let bytes = try await client.getHistoryPayload(profileId: profileId)
+            try Self.verify(bytes: bytes, against: entry)
+            pasteboard.write(data: bytes, uti: Self.utiForDataName(dataName), originalName: dataName)
+            lastAppliedAttachmentName = dataName
+            applyError = nil
+        } catch let e as SyncError {
+            applyError = e
+        } catch {
+            applyError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+        }
+    }
+
+    /// Download a history row's payload bytes (§2.11) and write them to
+    /// `Documents/<sanitized downloadRelativePath>/<dataName>`.
+    ///
+    /// Works for any image/file entry in `history`, not just the live
+    /// latest — that's the whole point of §2.11. The hash → composite
+    /// `profileId` form addresses the record regardless of whether the
+    /// live `SyncClipboard.json` still points at it.
+    ///
+    /// Concurrency: shares the `isSaving` / `saveError` / `lastSavedFileURL`
+    /// state with `saveServerAttachment` so the UI banner machinery
+    /// doesn't need to know which path was taken. The first call wins;
+    /// subsequent calls while a save is in flight return silently.
+    func saveAttachment(for item: ClipboardHistoryItem) async {
+        guard !isSaving else { return }
+        let entry = item.entry
+        guard entry.hasData,
+              entry.type == .image || entry.type == .file,
+              let dataName = entry.dataName,
+              let server = effectiveActiveConfig
+        else { return }
+        // §2.11 addresses by `<type>-<hash>`. Without a hash there's no
+        // record to fetch; the live-latest path (`saveServerAttachment`)
+        // is the fallback for legacy publishers that omit hashes.
+        guard let hash = entry.hash, !hash.isEmpty else { return }
+        let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
+
+        isSaving = true
+        defer { isSaving = false }
+        lastSavedFileURL = nil
+        lastAppliedAttachmentName = nil
+        do {
+            let client = try SyncClipboardClient(server: server, trustInsecureCert: appSettings.trustInsecureCert)
+            let bytes = try await client.getHistoryPayload(profileId: profileId)
+            try Self.verify(bytes: bytes, against: entry)
+            let url = try Self.targetURL(for: dataName, relative: appSettings.downloadRelativePath)
+            try bytes.write(to: url, options: .atomic)
+            lastSavedFileURL = url
+            saveError = nil
+        } catch let e as SyncError {
+            saveError = e
+        } catch {
+            saveError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+        }
+    }
+
+    /// Download the live-latest server entry's payload via §2.4 and
+    /// write it to `Documents/<sanitized downloadRelativePath>/<dataName>`.
+    /// Group entries are out of scope (§4.3 ZIP-traversal hash is its
+    /// own slice). Overwrites on collision — matches Files-app behavior.
     func saveServerAttachment() async {
         guard !isSaving else { return }
         guard let entry = serverLatest,
@@ -223,6 +456,7 @@ final class AppViewModel {
         isSaving = true
         defer { isSaving = false }
         lastSavedFileURL = nil
+        lastAppliedAttachmentName = nil
         do {
             let client = try SyncClipboardClient(server: server, trustInsecureCert: appSettings.trustInsecureCert)
             let bytes = try await client.getFile(name: dataName)
@@ -359,10 +593,12 @@ extension AppViewModel {
         if isRefreshing { return }
         isRefreshing = true
         defer { isRefreshing = false }
-        // The "已保存到 …" caption is bound to the last save attempt, not
-        // the server-side state. A refresh changes what's on screen, so the
-        // caption no longer matches the entry above it — clear it.
+        // The transient feedback banners ("已保存到 …" / "已复制 … 到剪贴板")
+        // are bound to the last user action, not the server-side state.
+        // A refresh changes what's on screen, so they no longer match
+        // what the user just saw — clear both.
         lastSavedFileURL = nil
+        lastAppliedAttachmentName = nil
         let trustInsecure = appSettings.trustInsecureCert
         do {
             let client = try SyncClipboardClient(server: server, trustInsecureCert: trustInsecure)
@@ -405,6 +641,11 @@ extension AppViewModel {
         store.saveAppSettings(appSettings)
         let pasteboardEnv: [String: String] = ["UC_DEVICE_TEXT": deviceText ?? ""]
         let pasteboard = DevicePasteboardObserver(environment: pasteboardEnv)
-        return AppViewModel(store: store, forceFreshServers: false, pasteboard: pasteboard)
+        let vm = AppViewModel(store: store, forceFreshServers: false, pasteboard: pasteboard)
+        // Previews want representative content — `history` defaults to
+        // empty (SyncEngine fills it at runtime), so seed mock entries
+        // here so design previews don't all look like empty states.
+        vm.history = Mock.history
+        return vm
     }
 }

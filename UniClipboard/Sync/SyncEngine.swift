@@ -95,6 +95,26 @@ final class SyncEngine {
     @ObservationIgnored
     var offlineBackoffSeconds: Double = 5.0
 
+    /// Minimum gap between successive §2.7 `POST /api/history/query`
+    /// rounds. The live-clipboard tick runs every 1s, but the history
+    /// API is a heavier (paginated) operation and changes rarely outside
+    /// of explicit user activity — 30s captures cross-device edits
+    /// quickly enough without hammering the server. Public for tests
+    /// that want to compress it to zero.
+    @ObservationIgnored
+    var historySyncInterval: Double = 30.0
+
+    /// Safety bound on the inner pagination loop. The empty-array
+    /// sentinel is the documented end-of-list, so this only ever fires
+    /// on a misbehaving server.
+    @ObservationIgnored
+    var historySyncMaxPages: Int = 50
+
+    /// When the last successful (or attempted) `runHistorySyncIfDue` ran.
+    /// nil triggers an immediate first sync on the next tick.
+    @ObservationIgnored
+    private var lastHistorySyncAt: Date?
+
     init(viewModel: AppViewModel, store: SettingsStore) {
         self.viewModel = viewModel
         self.store = store
@@ -147,6 +167,11 @@ final class SyncEngine {
         stagedEntry = nil
         lastError = nil
         state = .idle
+        // Force the next tick to hit /api/history/query immediately —
+        // the new server's `lastModified` watermark is unrelated to the
+        // old one's, so we have to refetch from scratch (the caller
+        // clears `vm.historyWatermark` separately).
+        lastHistorySyncAt = nil
     }
 
     /// Called by `AppViewModel.servers.didSet`. Decides whether to clear
@@ -163,6 +188,9 @@ final class SyncEngine {
             resetRuntimeState()
             lastSyncedContentHash = nil
             store.saveLastSyncedHash(nil)
+            // §2.7 watermark is per-server too — clear it so the next
+            // tick pulls the new server's full history page by page.
+            viewModel?.historyWatermark = nil
         }
         if state == .authFailed {
             // The user almost certainly just edited credentials. Restart and
@@ -183,6 +211,9 @@ final class SyncEngine {
         resetRuntimeState()
         lastSyncedContentHash = nil
         store.saveLastSyncedHash(nil)
+        // §2.7 watermark is per-server. Also clear it so the new server's
+        // first history pull is unfiltered.
+        viewModel?.historyWatermark = nil
         if state == .authFailed {
             start()
         } else {
@@ -233,10 +264,16 @@ final class SyncEngine {
             if let serverEntry = serverEntryOrNil,
                !hashesEqual(serverEntry.hash, lastSyncedContentHash) {
                 try await processServerNew(serverEntry, client: client, vm: vm)
-                return
+            } else {
+                // Push side.
+                try await maybePush(client: client, vm: vm, server: server)
             }
-            // Push side.
-            try await maybePush(client: client, vm: vm, server: server)
+            // Best-effort incremental history sync (§2.7), throttled to
+            // `historySyncInterval`. Internal failures don't escalate to
+            // engine state — history is a strict superset of the live
+            // clipboard, and the live tick above is the user-visible
+            // sync signal.
+            await runHistorySyncIfDue(client: client, vm: vm)
         } catch let e as SyncError where e.kind == .authFailed {
             state = .authFailed
             lastError = e
@@ -260,6 +297,11 @@ final class SyncEngine {
         let alreadyStaged = stagedServerHash.map { hashesEqual($0, entry.hash) } ?? false
         if !alreadyStaged {
             vm.serverLatest = entry
+            // First time we see this server entry — log it on the Home
+            // list as a pulled event. The staged branch above is a
+            // re-observation of the same hash, so we'd otherwise double
+            // log every tick the user leaves auto-apply off.
+            vm.appendHistory(entry: entry, direction: .pulled)
         }
         if vm.appSettings.autoApplyServerChanges {
             // Reuse vm.applyServerToDevice — it handles text-short / text-long /
@@ -308,12 +350,20 @@ final class SyncEngine {
             lastError = nil
             return
         }
+        // `vm.push()` early-returns silently if the pasteboard snapshot
+        // is nil or has an unpushable type — in that case nothing
+        // network-side happened, but `vm.serverLatest` is still the
+        // last-known good entry. Use `lastPushedAt` advancing as the
+        // canonical "a real push round-tripped" signal so we don't
+        // double-log the live entry as `.pushed`.
+        let prePushedAt = vm.lastPushedAt
         await vm.push()
         if let err = vm.pushError {
             throw err
         }
-        if let pushed = vm.serverLatest {
+        if vm.lastPushedAt != prePushedAt, let pushed = vm.serverLatest {
             advanceSynced(to: pushed.hash)
+            vm.appendHistory(entry: pushed, direction: .pushed)
             // Mirror the Share Extension's donation so iOS Sharing
             // Suggestions ranks this server higher even when the user
             // never explicitly invokes the share sheet — auto-sync
@@ -339,6 +389,47 @@ final class SyncEngine {
         let normalized = hash.uppercased()
         lastSyncedContentHash = normalized
         store.saveLastSyncedHash(normalized)
+    }
+
+    /// Pull the §2.7 history pages incrementally and merge into
+    /// `vm.history`. Best-effort: any failure is swallowed and the next
+    /// due window will retry. Throttled by `historySyncInterval`.
+    private func runHistorySyncIfDue(client: SyncClipboardClient, vm: AppViewModel) async {
+        if let last = lastHistorySyncAt,
+           Date().timeIntervalSince(last) < historySyncInterval {
+            return
+        }
+        // Always advance the throttle, even on failure — otherwise a
+        // server that 500s on /api/history/query would have every 1Hz
+        // tick spam-retry the endpoint.
+        defer { lastHistorySyncAt = .now }
+
+        let watermark = vm.historyWatermark
+        var maxModified: Date = watermark ?? .distantPast
+        var page = 1
+        while page <= historySyncMaxPages {
+            let records: [HistoryRecord]
+            do {
+                records = try await client.queryHistory(
+                    HistoryQuery(page: page, modifiedAfter: watermark)
+                )
+            } catch {
+                // Best-effort. Swallow — the engine's `state` and
+                // `lastError` remain tied to the live-clipboard path.
+                return
+            }
+            if records.isEmpty { break }
+            for record in records {
+                vm.mergeHistoryRecord(record)
+                if let lm = record.lastModified, lm > maxModified {
+                    maxModified = lm
+                }
+            }
+            page += 1
+        }
+        if maxModified > (watermark ?? .distantPast) {
+            vm.historyWatermark = maxModified
+        }
     }
 
     private func hashesEqual(_ a: String?, _ b: String?) -> Bool {

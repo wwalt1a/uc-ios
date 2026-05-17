@@ -1,15 +1,14 @@
 import SwiftUI
 
-/// Home tab — single focal card.
+/// Home tab — recent clipboard entries grouped by date.
 ///
-/// Cycle 9 removed the manual "推送" / "应用到本机" buttons; the engine
-/// converges both directions on a 1Hz foreground tick, so the server
-/// snapshot and the device pasteboard are nearly always the same string.
-/// Cycle 10 collapses the previous Server-card + connector + Device-card
-/// stack into one card that shows "what's on the clipboard right now",
-/// with engine state surfaced as a thin status row and exceptional
-/// outcomes (auth fail, save error, save success, …) shown as a slim
-/// bar pinned to the card's bottom edge.
+/// Earlier cycles showed a single focal card for the active clipboard.
+/// Cycle 11 expands that to a Messages-style time-descending list so the
+/// "what's on the server" view stops feeling lossy. The spec only keeps
+/// one entry on the wire (§2.1), so the list is fed by `vm.history` —
+/// today seeded from [`Mock.history`], future-wise to be appended by the
+/// `SyncEngine` on each successful pull/push and (optionally) hydrated
+/// from §2.7 `POST /api/history/query` on UniClipboard servers.
 struct HomeView: View {
     @Bindable var vm: AppViewModel
 
@@ -23,113 +22,227 @@ struct HomeView: View {
     private var engineState: SyncEngine.State { vm.engine.state }
     private var isExplicitlyRefreshing: Bool { vm.engine.isExplicitlyRefreshing }
 
-    /// What to render in the card body. The engine keeps both sides in sync
-    /// so these are almost always the same content; we prefer the server
-    /// copy because it carries the canonical `hash` / `dataName` metadata
-    /// the UI shows in the size row and the save-to-Documents action.
-    private var displayedEntry: Clipboard? {
-        vm.serverLatest ?? vm.deviceClipboard
+    /// History rendered in the list, sorted newest-first. The mock data
+    /// already lands in roughly that order but never trust the caller —
+    /// SyncEngine will append in arrival order once wired.
+    private var sortedHistory: [ClipboardHistoryItem] {
+        vm.history.sorted { $0.timestamp > $1.timestamp }
     }
 
-    /// Last sync timestamp shown in the card's metadata row. Falls back to
-    /// the VM's snapshot timestamp for cold-launch or before the engine's
-    /// first tick lands.
-    private var lastSyncedAt: Date? {
-        vm.engine.lastSyncedAt ?? vm.lastSyncedAt
+    private var latestId: UUID? { sortedHistory.first?.id }
+
+    /// Bucket the sorted history into 今天 / 昨天 / 7 天内 / 更早 sections.
+    /// The "past 7 days" bucket is a sliding-window count rather than the
+    /// calendar's "this week" — `Calendar.isDate(_:equalTo:toGranularity:)`
+    /// keys off `firstWeekday`, so on Sundays (firstWeekday=1, zh_CN) the
+    /// week-of-year window collapses to today only and the bucket
+    /// disappears. A 7-day window is what users actually mean.
+    private var groupedHistory: [HistorySection] {
+        HistorySection.bucket(sortedHistory)
     }
 
     var body: some View {
-        // GeometryReader + minHeight lets the card vertically center when
-        // content is short (empty state, single-line text) while still
-        // scrolling cleanly when text overflows the viewport. Without the
-        // minHeight pin the ScrollView shrinks to fit its content and the
-        // card sticks to the top.
-        GeometryReader { geo in
-            ScrollView {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    ClipboardCard(
-                        entry: displayedEntry,
-                        lastSyncedAt: lastSyncedAt,
-                        status: cardStatus,
-                        isSaving: vm.isSaving,
-                        lastSavedFileURL: vm.lastSavedFileURL,
-                        saveError: vm.saveError,
-                        bottomBar: bottomBar,
-                        onSave: { Task { await vm.saveServerAttachment() } }
+        listOrEmpty
+            .refreshable {
+                await vm.engine.explicitRefresh()
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("剪贴板")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    ServerChip(
+                        activeServer: vm.effectiveActiveConfig,
+                        defaultServerId: vm.servers.activeConfigId,
+                        isAutoSwitched: vm.isAutoSwitchOverridden,
+                        allServers: vm.servers.configs,
+                        onSelect: { id in vm.servers.activeConfigId = id }
                     )
-                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .frame(minHeight: geo.size.height)
-            }
-        }
-        .refreshable {
-            await vm.engine.explicitRefresh()
-        }
-        .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
-        .navigationTitle("剪贴板")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                ServerChip(
-                    activeServer: vm.effectiveActiveConfig,
-                    defaultServerId: vm.servers.activeConfigId,
-                    isAutoSwitched: vm.isAutoSwitchOverridden,
-                    allServers: vm.servers.configs,
-                    onSelect: { id in vm.servers.activeConfigId = id }
-                )
-            }
-            if let issue = currentIssue {
+                if let issue = currentIssue {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingErrorSheet = true
+                        } label: {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(issue.tint)
+                        }
+                        .accessibilityLabel(Text(issue.title))
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showingErrorSheet = true
+                        vm.engine.forceTickNow()
                     } label: {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundStyle(issue.tint)
-                    }
-                    .accessibilityLabel(Text(issue.title))
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    vm.engine.forceTickNow()
-                } label: {
-                    if isExplicitlyRefreshing {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .disabled(isExplicitlyRefreshing)
-            }
-        }
-        .sheet(isPresented: $showingErrorSheet) {
-            if let issue = currentIssue {
-                IssueDetailSheet(
-                    issue: issue,
-                    onPrimaryAction: {
-                        showingErrorSheet = false
-                        switch issue.primaryAction {
-                        case .goToSettings: onGoToSettings()
-                        case .retry:        vm.engine.forceTickNow()
-                        case .dismiss:      break
+                        if isExplicitlyRefreshing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
                         }
                     }
-                )
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
+                    .disabled(isExplicitlyRefreshing)
+                }
             }
+            .sheet(isPresented: $showingErrorSheet) {
+                if let issue = currentIssue {
+                    IssueDetailSheet(
+                        issue: issue,
+                        onPrimaryAction: {
+                            showingErrorSheet = false
+                            switch issue.primaryAction {
+                            case .goToSettings: onGoToSettings()
+                            case .retry:        vm.engine.forceTickNow()
+                            case .dismiss:      break
+                            }
+                        }
+                    )
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var listOrEmpty: some View {
+        if sortedHistory.isEmpty {
+            ContentUnavailableView {
+                Label {
+                    Text("还没有同步过剪贴板")
+                } icon: {
+                    Image(systemName: "doc.on.clipboard")
+                }
+            } description: {
+                Text("复制任何内容会自动同步")
+            }
+        } else {
+            List {
+                ForEach(groupedHistory) { section in
+                    Section {
+                        ForEach(section.items) { item in
+                            ClipboardRow(
+                                item: item,
+                                isLatest: item.id == latestId
+                            )
+                            .listRowBackground(
+                                item.id == latestId
+                                    ? Color.accentColor.opacity(0.08)
+                                    : Color(.secondarySystemGroupedBackground)
+                            )
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                if item.entry.type == .text {
+                                    Button {
+                                        vm.reapplyText(item.entry.text)
+                                    } label: {
+                                        Label("复制", systemImage: "doc.on.clipboard")
+                                    }
+                                    .tint(.blue)
+                                } else if item.entry.type == .image, item.entry.hasData {
+                                    Button {
+                                        Task { await vm.applyAttachment(for: item) }
+                                    } label: {
+                                        Label("复制", systemImage: "doc.on.clipboard")
+                                    }
+                                    .tint(.blue)
+                                }
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    vm.removeHistoryItem(id: item.id)
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                                if item.entry.hasData,
+                                   item.entry.type == .image || item.entry.type == .file {
+                                    Button {
+                                        Task { await vm.saveAttachment(for: item) }
+                                    } label: {
+                                        Label("保存", systemImage: "square.and.arrow.down")
+                                    }
+                                    .tint(.indigo)
+                                }
+                            }
+                            .contextMenu {
+                                rowMenu(for: item)
+                            }
+                        }
+                    } header: {
+                        Text(section.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .textCase(nil)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if engineState == .hasNewUnwritten {
+                    PendingBanner {
+                        Task { await vm.applyServerToDevice() }
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // `lastSavedFileURL` and `lastAppliedAttachmentName` are
+                // mutually cleared on each attempt (see AppViewModel),
+                // but if both ever co-exist save wins — it's the more
+                // expensive action so its feedback is more meaningful.
+                if let url = vm.lastSavedFileURL {
+                    SavedBanner(filePath: displayPath(for: url))
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if let name = vm.lastAppliedAttachmentName {
+                    AppliedBanner(name: name)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy, value: engineState)
+            .animation(.snappy, value: vm.lastSavedFileURL)
+            .animation(.snappy, value: vm.lastAppliedAttachmentName)
+        }
+    }
+
+    @ViewBuilder
+    private func rowMenu(for item: ClipboardHistoryItem) -> some View {
+        if item.entry.type == .text {
+            Button {
+                vm.reapplyText(item.entry.text)
+            } label: {
+                Label("复制到本机", systemImage: "doc.on.clipboard")
+            }
+            Button {
+                UIPasteboard.general.string = item.entry.text
+            } label: {
+                Label("仅复制文本", systemImage: "text.alignleft")
+            }
+        } else if item.entry.type == .image, item.entry.hasData {
+            Button {
+                Task { await vm.applyAttachment(for: item) }
+            } label: {
+                Label("复制到本机", systemImage: "doc.on.clipboard")
+            }
+        }
+        if item.entry.hasData,
+           item.entry.type == .image || item.entry.type == .file {
+            Button {
+                Task { await vm.saveAttachment(for: item) }
+            } label: {
+                Label("保存到 Documents", systemImage: "square.and.arrow.down")
+            }
+        }
+        Divider()
+        Button(role: .destructive) {
+            vm.removeHistoryItem(id: item.id)
+        } label: {
+            Label("从历史中删除", systemImage: "trash")
         }
     }
 
     /// Active error worth surfacing as the toolbar's red bang. `nil` keeps
     /// the chrome clean. Priority: save-failure (user-initiated, sticky
-    /// until next attempt) > engine state (auth fail > offline). Note that
-    /// `.hasNewUnwritten` is *not* an issue — it's an opt-in waiting state
-    /// the user signed up for by turning auto-apply off.
+    /// until next attempt) > engine state (auth fail > offline). The
+    /// `.hasNewUnwritten` state is intentionally NOT an issue — it owns
+    /// its own banner above the list.
     private var currentIssue: HomeIssue? {
         if let err = vm.saveError {
             return .saveFailed(message: errorMessage(err), detail: err.underlying)
@@ -147,41 +260,8 @@ struct HomeView: View {
         }
     }
 
-    /// Maps engine state to the small status pill drawn in the card's
-    /// metadata row. `nil` keeps the row clean when there's nothing
-    /// useful to say (idle with no content yet — the empty state takes
-    /// over).
-    private var cardStatus: ClipboardCard.Status? {
-        if isExplicitlyRefreshing { return .syncing }
-        switch engineState {
-        case .idle:
-            return displayedEntry == nil ? nil : .syncing
-        case .succeeded:
-            return .synced
-        case .hasNewUnwritten:
-            // The bottom bar carries the actionable copy; the pill just
-            // mirrors the same idea so the row doesn't read "已同步" while
-            // the bar says otherwise.
-            return .pending
-        case .offlineRetrying:
-            return .offline
-        case .authFailed:
-            return .authFailed
-        }
-    }
-
-    /// Bottom-bar payload. Only carries *informational* states now —
-    /// "已保存到 …" (transient positive feedback) and "服务器有新内容"
-    /// (an opt-in waiting state). Hard errors moved to the toolbar's red
-    /// bang + detail sheet, so the card itself never wears warning paint.
-    private var bottomBar: ClipboardCard.BottomBar? {
-        if let url = vm.lastSavedFileURL {
-            return .saved(url: url)
-        }
-        if engineState == .hasNewUnwritten {
-            return .pendingApply
-        }
-        return nil
+    private func displayPath(for url: URL) -> String {
+        url.pathComponents.suffix(2).joined(separator: "/")
     }
 
     private func errorMessage(_ err: SyncError) -> String {
@@ -200,253 +280,212 @@ struct HomeView: View {
     }
 }
 
-// MARK: - Single clipboard card
+// MARK: - Date bucketing
 
-private struct ClipboardCard: View {
-    enum Status {
-        case syncing, synced, pending, offline, authFailed
-    }
+/// Time-bucketed list section. Title is computed once during bucketing
+/// and stored so the view doesn't re-evaluate the calendar on every
+/// redraw. `id` is the bucket case so SwiftUI's diffing stays stable
+/// even when the items inside change.
+private struct HistorySection: Identifiable {
+    enum Bucket: Int, CaseIterable {
+        case today, yesterday, pastWeek, earlier
 
-    enum BottomBar {
-        case saved(url: URL)
-        case pendingApply
-    }
-
-    let entry: Clipboard?
-    let lastSyncedAt: Date?
-    let status: Status?
-    let isSaving: Bool
-    let lastSavedFileURL: URL?
-    let saveError: SyncError?
-    let bottomBar: BottomBar?
-    let onSave: () -> Void
-
-    private var canSave: Bool {
-        guard let entry else { return false }
-        return entry.hasData && (entry.type == .image || entry.type == .file)
-    }
-
-    var body: some View {
-        if let entry {
-            VStack(spacing: 0) {
-                contentBlock(entry: entry)
-                if let bottomBar {
-                    Divider().opacity(0.25)
-                    bottomBarView(bottomBar)
-                }
-            }
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-            )
-        } else {
-            // No card chrome on the empty state — ContentUnavailableView
-            // is the iOS 17+ native pattern (large symbol, headline,
-            // secondary copy), centered without a container.
-            emptyState
-        }
-    }
-
-    // MARK: Content
-
-    @ViewBuilder
-    private func contentBlock(entry: Clipboard) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header(entry: entry)
-            preview(entry: entry)
-            metadataRow(entry: entry)
-            if canSave {
-                saveButton
-            }
-        }
-        .padding(20)
-    }
-
-    private func header(entry: Clipboard) -> some View {
-        HStack(spacing: 10) {
-            ClipboardKindBadge(kind: entry.type, size: .small)
-            Spacer()
-            if let status, status != .synced {
-                statusPill(for: status)
+        var title: String {
+            switch self {
+            case .today:     String(localized: "今天")
+            case .yesterday: String(localized: "昨天")
+            case .pastWeek:  String(localized: "7 天内")
+            case .earlier:   String(localized: "更早")
             }
         }
     }
 
-    @ViewBuilder
-    private func preview(entry: Clipboard) -> some View {
-        switch entry.type {
-        case .text:
-            Text(entry.text)
-                .font(.title3)
-                .foregroundStyle(.primary)
-                .lineLimit(6)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-        case .image, .file, .group:
-            HStack(spacing: 14) {
-                ClipboardKindBadge(kind: entry.type, size: .large, showsLabel: false)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.text)
-                        .font(.headline)
-                        .lineLimit(1)
-                    if let dataName = entry.dataName, dataName != entry.text {
-                        Text(dataName)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
+    let id: Bucket
+    let title: String
+    let items: [ClipboardHistoryItem]
+
+    static func bucket(
+        _ items: [ClipboardHistoryItem],
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> [HistorySection] {
+        var buckets: [Bucket: [ClipboardHistoryItem]] = [:]
+        for item in items {
+            buckets[Self.bucket(for: item.timestamp, now: now, calendar: calendar), default: []]
+                .append(item)
+        }
+        return Bucket.allCases.compactMap { b in
+            guard let items = buckets[b], !items.isEmpty else { return nil }
+            return HistorySection(id: b, title: b.title, items: items)
         }
     }
 
-    private func metadataRow(entry: Clipboard) -> some View {
-        HStack(spacing: 8) {
-            if let size = entry.size {
-                Text(formatSize(size, kind: entry.type))
-            }
-            if entry.size != nil, lastSyncedAt != nil { dot }
-            if let lastSyncedAt {
-                Text(lastSyncedAt.relativeShort)
-            }
-            if let status, status == .synced {
-                if entry.size != nil || lastSyncedAt != nil { dot }
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text("已同步")
-                }
-            }
-            Spacer(minLength: 0)
+    private static func bucket(for date: Date, now: Date, calendar: Calendar) -> Bucket {
+        if calendar.isDateInToday(date) { return .today }
+        if calendar.isDateInYesterday(date) { return .yesterday }
+        // Sliding 7-day window from `now`. Yesterday is carved out above,
+        // so this catches 2–7 days ago regardless of `firstWeekday`.
+        if let sevenAgo = calendar.date(byAdding: .day, value: -7, to: now),
+           date >= sevenAgo {
+            return .pastWeek
         }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-    }
-
-    private var dot: some View {
-        Text("·").foregroundStyle(.tertiary)
-    }
-
-    private func statusPill(for status: Status) -> some View {
-        HStack(spacing: 5) {
-            statusIcon(for: status)
-                .font(.caption2.weight(.semibold))
-            Text(statusLabel(for: status))
-                .font(.caption.weight(.medium))
-        }
-        .foregroundStyle(statusTint(for: status))
-        .padding(.vertical, 4)
-        .padding(.horizontal, 9)
-        .background(statusTint(for: status).opacity(0.12), in: Capsule())
-    }
-
-    @ViewBuilder
-    private func statusIcon(for status: Status) -> some View {
-        switch status {
-        case .syncing:    ProgressView().controlSize(.mini)
-        case .synced:     Image(systemName: "checkmark")
-        case .pending:    Image(systemName: "tray.and.arrow.down")
-        case .offline:    Image(systemName: "wifi.exclamationmark")
-        case .authFailed: Image(systemName: "lock.fill")
-        }
-    }
-
-    private func statusLabel(for status: Status) -> LocalizedStringKey {
-        switch status {
-        case .syncing:    "同步中"
-        case .synced:     "已同步"
-        case .pending:    "待应用"
-        case .offline:    "离线"
-        case .authFailed: "认证失败"
-        }
-    }
-
-    private func statusTint(for status: Status) -> Color {
-        switch status {
-        case .syncing:    .secondary
-        case .synced:     .green
-        case .pending:    .indigo
-        case .offline:    .orange
-        case .authFailed: .red
-        }
-    }
-
-    private var saveButton: some View {
-        Button {
-            onSave()
-        } label: {
-            HStack(spacing: 6) {
-                if isSaving {
-                    ProgressView().controlSize(.small)
-                    Text("正在保存…")
-                } else {
-                    Image(systemName: "square.and.arrow.down")
-                    Text("保存到 Documents")
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-        .disabled(!canSave || isSaving)
-    }
-
-    // MARK: Empty state
-
-    private var emptyState: some View {
-        ContentUnavailableView {
-            Label {
-                Text("还没有同步过剪贴板")
-            } icon: {
-                Image(systemName: "doc.on.clipboard")
-            }
-        } description: {
-            Text("复制任何内容会自动同步")
-        }
-    }
-
-    // MARK: Bottom bar
-
-    @ViewBuilder
-    private func bottomBarView(_ bar: BottomBar) -> some View {
-        switch bar {
-        case .saved(let url):
-            BottomBarRow(
-                icon: "checkmark.circle.fill",
-                tint: .green,
-                title: String(localized: "已保存到 \(displayPath(for: url))")
-            )
-        case .pendingApply:
-            BottomBarRow(
-                icon: "tray.and.arrow.down.fill",
-                tint: .indigo,
-                title: String(localized: "服务器有新内容，未自动写入本机")
-            )
-        }
-    }
-
-    private func displayPath(for url: URL) -> String {
-        url.pathComponents.suffix(2).joined(separator: "/")
+        return .earlier
     }
 }
 
-// MARK: - Bottom bar row
+// MARK: - Row
 
-private struct BottomBarRow: View {
-    let icon: String
-    let tint: Color
-    let title: String
+private struct ClipboardRow: View {
+    let item: ClipboardHistoryItem
+    let isLatest: Bool
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: icon)
+        HStack(alignment: .top, spacing: 12) {
+            ClipboardKindBadge(kind: item.entry.type, size: .medium, showsLabel: false)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 6) {
+                preview
+                metadataRow
+            }
+
+            Spacer(minLength: 0)
+
+            if isLatest {
+                latestPill
+            }
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        switch item.entry.type {
+        case .text:
+            Text(item.entry.text)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+        case .image, .file, .group:
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.entry.text)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let dataName = item.entry.dataName, dataName != item.entry.text {
+                    Text(dataName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+    }
+
+    private var metadataRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: item.direction == .pulled ? "arrow.down" : "arrow.up")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(item.direction == .pulled ? Color.blue : Color.indigo)
+            Text(item.timestamp.relativeShort)
+            if let size = item.entry.size {
+                Text("·").foregroundStyle(.tertiary)
+                Text(formatSize(size, kind: item.entry.type))
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private var latestPill: some View {
+        Text("当前")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.accentColor.opacity(0.18), in: Capsule())
+            .accessibilityLabel(Text("当前剪贴板"))
+    }
+}
+
+// MARK: - Inline banners
+
+/// "服务器有新内容,未自动写入本机" — pinned above the list so the user
+/// can dismiss it by tapping "应用". Sits inside the same scroll surface
+/// (safeAreaInset) so it doesn't visually orphan from the list.
+private struct PendingBanner: View {
+    let onApply: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "tray.and.arrow.down.fill")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(tint)
-            Text(title)
+                .foregroundStyle(.indigo)
+            Text("服务器有新内容,未自动写入本机")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+            Spacer(minLength: 8)
+            Button(action: onApply) {
+                Text("应用")
+                    .font(.footnote.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(.indigo)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.4)
+        }
+    }
+}
+
+/// Transient positive feedback after `applyAttachment(for:)`. Mirrors
+/// the SavedBanner layout but tints blue and points at the clipboard
+/// glyph — same visual vocabulary as the swipe-leading "复制" action.
+private struct AppliedBanner: View {
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "doc.on.clipboard.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.blue)
+            Text("已复制 \(name) 到剪贴板")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            Divider().opacity(0.4)
+        }
+    }
+}
+
+/// Transient positive feedback after `saveServerAttachment()`. Cleared
+/// implicitly on the next refresh — same lifecycle as the old card's
+/// bottom bar, just rehomed to a banner.
+private struct SavedBanner: View {
+    let filePath: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.green)
+            Text("已保存到 \(filePath)")
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.primary)
                 .lineLimit(2)
@@ -454,13 +493,10 @@ private struct BottomBarRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(tint.opacity(0.08))
-        .clipShape(
-            UnevenRoundedRectangle(
-                cornerRadii: .init(bottomLeading: 22, bottomTrailing: 22),
-                style: .continuous
-            )
-        )
+        .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            Divider().opacity(0.4)
+        }
     }
 }
 
@@ -781,43 +817,22 @@ private func formatSize(_ size: Int, kind: Clipboard.Kind) -> String {
 
 // MARK: - Preview
 
-private func previewVM(serverLatest: Clipboard?, lastSyncedAt: Date?, deviceText: String?) -> AppViewModel {
-    let vm = AppViewModel.preview(deviceText: deviceText)
-    vm.serverLatest = serverLatest
-    vm.lastSyncedAt = lastSyncedAt
+private func previewVM(history: [ClipboardHistoryItem]? = nil) -> AppViewModel {
+    let vm = AppViewModel.preview()
+    if let history { vm.history = history }
     return vm
 }
 
-#Preview("Home — 已同步") {
-    let synced = "Hello, SyncClipboard!"
+#Preview("Home — 列表") {
     NavigationStack {
-        HomeView(vm: previewVM(
-            serverLatest: Clipboard.fromText(synced),
-            lastSyncedAt: Mock.serverLastSyncedAt,
-            deviceText: synced
-        ))
+        HomeView(vm: previewVM())
     }
     .tint(.indigo)
 }
 
-#Preview("Home — 图片附件") {
+#Preview("Home — 空状态") {
     NavigationStack {
-        HomeView(vm: previewVM(
-            serverLatest: Mock.serverLatest,
-            lastSyncedAt: Mock.serverLastSyncedAt,
-            deviceText: nil
-        ))
-    }
-    .tint(.indigo)
-}
-
-#Preview("Home — 服务器空") {
-    NavigationStack {
-        HomeView(vm: previewVM(
-            serverLatest: nil,
-            lastSyncedAt: nil,
-            deviceText: nil
-        ))
+        HomeView(vm: previewVM(history: []))
     }
     .tint(.indigo)
 }
