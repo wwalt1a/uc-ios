@@ -62,6 +62,7 @@ Pass per-launch env via `SIMCTL_CHILD_<NAME>=value` exported in the shell callin
 | `UC_SETUP_STEP=form\|autoswitch` | Bootstrap Setup `NavigationStack` path directly to that step |
 | `UC_PREFILL=1` | Prefill ServerForm fields with mock defaults |
 | `UC_PREFILL_TEST=success\|authFailed\|unreachable\|missingFields` | Seed ServerForm test-connection result on appear |
+| `UC_OPEN_SWITCHER=1` | Auto-present the ServerSwitcher sheet on Home (simctl has no synthetic-tap, so this is how the sheet gets screenshotted) |
 
 These hooks are only present so the design can be inspected without an interactive simulator (simctl has no synthetic-tap API). Not feature flags; remove on the day this becomes a real product.
 

@@ -415,35 +415,117 @@ private struct ServerChip: View {
     let allServers: [ServerConfig]
     let onSelect: (String) -> Void
 
+    @State private var showingSwitcher: Bool =
+        ProcessInfo.processInfo.environment["UC_OPEN_SWITCHER"] == "1"
+
     var body: some View {
-        Menu {
-            ForEach(allServers) { server in
-                Button {
-                    onSelect(server.id)
-                } label: {
-                    if server.id == activeServer?.id {
-                        Label(server.displayLabel, systemImage: "checkmark")
-                    } else {
-                        Text(server.displayLabel)
+        // `.fixedSize(horizontal: true, ...)` is load-bearing — without it
+        // SwiftUI's navigation bar squeezes the leading toolbar item to
+        // ~30pt and truncates the alias Text to zero width.
+        HStack(spacing: 6) {
+            Circle()
+                .fill(.green)
+                .frame(width: 6, height: 6)
+            Text(verbatim: activeServer?.displayLabel ?? String(localized: "未配置"))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(.thinMaterial, in: Capsule())
+        .fixedSize(horizontal: true, vertical: false)
+        .contentShape(Capsule())
+        .onTapGesture { showingSwitcher = true }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(Text("切换服务器"))
+        .accessibilityValue(Text(activeServer?.displayLabel ?? String(localized: "未配置")))
+        .sheet(isPresented: $showingSwitcher) {
+            ServerSwitcherSheet(
+                activeId: activeServer?.id,
+                servers: allServers,
+                onSelect: { id in
+                    onSelect(id)
+                    showingSwitcher = false
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+private struct ServerSwitcherSheet: View {
+    let activeId: String?
+    let servers: [ServerConfig]
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(servers) { server in
+                    Button {
+                        onSelect(server.id)
+                    } label: {
+                        ServerSwitcherRow(
+                            server: server,
+                            isActive: server.id == activeId
+                        )
                     }
+                    .buttonStyle(.plain)
+                    .listRowBackground(
+                        server.id == activeId
+                            ? Color.green.opacity(0.08)
+                            : Color.clear
+                    )
                 }
             }
-        } label: {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(.green)
-                    .frame(width: 6, height: 6)
-                Text(activeServer?.displayLabel ?? "未配置")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Image(systemName: "chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(.thinMaterial, in: Capsule())
+            .listStyle(.insetGrouped)
+            .navigationTitle("切换服务器")
+            .navigationBarTitleDisplayMode(.inline)
         }
+    }
+}
+
+private struct ServerSwitcherRow: View {
+    let server: ServerConfig
+    let isActive: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                .font(.title3)
+                .foregroundStyle(isActive ? Color.green : Color.secondary)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(server.displayLabel)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(server.url)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !server.autoSwitchWifiNames.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "wifi")
+                            .font(.caption2)
+                        Text(server.autoSwitchWifiNames.joined(separator: ", "))
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
 

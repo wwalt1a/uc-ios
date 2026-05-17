@@ -1030,6 +1030,50 @@
           }
         }
       }
+    },
+    "便于辨识的名称" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Friendly name"
+          }
+        }
+      }
+    },
+    "换一个名称" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generate another name"
+          }
+        }
+      }
+    },
+    "将显示在剪贴板顶栏。留空会用服务器地址替代。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shown on the Clipboard toolbar. Falls back to the server address when left blank."
+          }
+        }
+      }
+    },
+    "切换服务器" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch server"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

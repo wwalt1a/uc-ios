@@ -79,9 +79,12 @@ private struct ServersListView: View {
     var body: some View {
         List {
             Section {
-                ForEach(servers.configs) { server in
+                ForEach($servers.configs) { $server in
                     NavigationLink {
-                        ServerEditPlaceholderView(server: server)
+                        ServerEditView(
+                            server: $server,
+                            existingNames: existingNames(excludingId: server.id)
+                        )
                     } label: {
                         ServerRow(
                             server: server,
@@ -118,6 +121,10 @@ private struct ServersListView: View {
             }
         }
         .navigationTitle("服务器列表")
+    }
+
+    private func existingNames(excludingId: String) -> Set<String> {
+        Set(servers.configs.lazy.filter { $0.id != excludingId }.compactMap(\.name))
     }
 }
 
@@ -160,24 +167,51 @@ private struct ServerRow: View {
     }
 }
 
-// MARK: - Placeholders
+// MARK: - Server edit
 
-private struct ServerEditPlaceholderView: View {
-    let server: ServerConfig
+private struct ServerEditView: View {
+    @Binding var server: ServerConfig
+    let existingNames: Set<String>
+
+    /// Local edit buffer for the name so we can normalize on commit
+    /// (trim → empty becomes nil, conflicts get a numeric suffix nudge).
+    @State private var nameDraft: String = ""
+
     var body: some View {
         Form {
-            Section("基本") {
-                LabeledContent("名称") {
-                    if let name = server.name {
-                        Text(name)
-                    } else {
-                        Text("（未命名）")
+            Section {
+                HStack(spacing: 8) {
+                    TextField("便于辨识的名称", text: $nameDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button {
+                        nameDraft = ServerNameGenerator.generate(avoiding: existingNames)
+                    } label: {
+                        Image(systemName: "shuffle")
                     }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("换一个名称")
                 }
-                LabeledContent("URL", value: server.url)
-                LabeledContent("用户名", value: server.username)
-                LabeledContent("密码", value: String(repeating: "•", count: server.password.count))
+            } header: {
+                Text("名称")
+            } footer: {
+                Text("将显示在剪贴板顶栏。留空会用服务器地址替代。")
             }
+
+            Section("连接") {
+                LabeledContent("URL", value: server.url)
+                LabeledContent {
+                    Text(server.username)
+                } label: {
+                    Text("用户名")
+                }
+                LabeledContent {
+                    Text(String(repeating: "•", count: server.password.count))
+                } label: {
+                    Text("密码")
+                }
+            }
+
             Section("自动切换") {
                 if server.autoSwitchWifiNames.isEmpty {
                     Text("无").foregroundStyle(.secondary)
@@ -187,11 +221,22 @@ private struct ServerEditPlaceholderView: View {
                     }
                 }
             }
+
             Section {
                 Button("测试连接") {}
             }
         }
         .navigationTitle(server.displayLabel)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            nameDraft = server.name ?? ""
+        }
+        .onChange(of: nameDraft) { _, _ in
+            // Commit on every keystroke — onDisappear is unreliable when
+            // SwiftUI rebuilds the navigation stack mid-edit.
+            let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            server.name = trimmed.isEmpty ? nil : trimmed
+        }
     }
 }
 

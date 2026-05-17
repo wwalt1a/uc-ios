@@ -16,9 +16,18 @@ struct SetupFlowView: View {
 
     @State private var path: [Step] = Step.initialPath()
 
+    /// Alias for the server being configured. Hoisted up here (rather than
+    /// inside `ServerFormStepView`) so popping back to the form preserves
+    /// what the user typed — destinations get torn down on pop.
+    @State private var draftName: String = ""
+
+    private var existingNames: Set<String> {
+        Set(vm.servers.configs.compactMap(\.name))
+    }
+
     enum Step: Hashable {
         case form
-        case autoSwitch(url: String, username: String, password: String)
+        case autoSwitch(name: String, url: String, username: String, password: String)
 
         static func initialPath() -> [Step] {
             switch ProcessInfo.processInfo.environment["UC_SETUP_STEP"] {
@@ -28,6 +37,7 @@ struct SetupFlowView: View {
                 return [
                     .form,
                     .autoSwitch(
+                        name: SetupPrefill.name,
                         url: SetupPrefill.url,
                         username: SetupPrefill.username,
                         password: SetupPrefill.password
@@ -45,9 +55,13 @@ struct SetupFlowView: View {
                 .navigationDestination(for: Step.self) { step in
                     switch step {
                     case .form:
-                        ServerFormStepView()
-                    case .autoSwitch(let url, let username, let password):
+                        ServerFormStepView(
+                            name: $draftName,
+                            existingNames: existingNames
+                        )
+                    case .autoSwitch(let name, let url, let username, let password):
                         AutoSwitchStepView(
+                            name: name,
                             url: url,
                             username: username,
                             password: password,
@@ -130,6 +144,9 @@ private struct WelcomeStepView: View {
 // MARK: - Step 2 · ServerForm
 
 private struct ServerFormStepView: View {
+    @Binding var name: String
+    let existingNames: Set<String>
+
     @State private var url: String = SetupPrefill.url
     @State private var username: String = SetupPrefill.username
     @State private var password: String = SetupPrefill.password
@@ -147,6 +164,25 @@ private struct ServerFormStepView: View {
 
     var body: some View {
         Form {
+            Section {
+                HStack(spacing: 8) {
+                    TextField("便于辨识的名称", text: $name)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button {
+                        name = ServerNameGenerator.generate(avoiding: existingNames)
+                    } label: {
+                        Image(systemName: "shuffle")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("换一个名称")
+                }
+            } header: {
+                Text("名称")
+            } footer: {
+                Text("将显示在剪贴板顶栏。留空会用服务器地址替代。")
+            }
+
             Section {
                 TextField("https://your-server.com:5033/", text: $url)
                     .keyboardType(.URL)
@@ -190,7 +226,7 @@ private struct ServerFormStepView: View {
                 if test == .success {
                     NavigationLink(
                         value: SetupFlowView.Step.autoSwitch(
-                            url: url, username: username, password: password
+                            name: name, url: url, username: username, password: password
                         )
                     ) {
                         HStack {
@@ -207,6 +243,14 @@ private struct ServerFormStepView: View {
         }
         .navigationTitle("服务器配置")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            // First visit: seed with a fresh alias. If the user clears it
+            // intentionally we don't refill — `.isEmpty` will be saved as
+            // `nil` and `displayLabel` falls back to URL per §5.1.
+            if name.isEmpty {
+                name = ServerNameGenerator.generate(avoiding: existingNames)
+            }
+        }
     }
 
     @ViewBuilder
@@ -289,6 +333,7 @@ private struct ServerFormStepView: View {
 // MARK: - Step 3 · AutoSwitch
 
 private struct AutoSwitchStepView: View {
+    let name: String
     let url: String
     let username: String
     let password: String
@@ -364,9 +409,10 @@ private struct AutoSwitchStepView: View {
     }
 
     private func save() {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let server = ServerConfig(
             id: UUID().uuidString.lowercased(),
-            name: nil,
+            name: trimmedName.isEmpty ? nil : trimmedName,
             url: url,
             username: username,
             password: password,
@@ -381,6 +427,7 @@ private struct AutoSwitchStepView: View {
 // MARK: - Prefill (env-driven for screenshots / quick demo)
 
 private enum SetupPrefill {
+    static var name:     String { value("UC_PREFILL_NAME",     fallback: "happy-otter") }
     static var url:      String { value("UC_PREFILL_URL",      fallback: "https://clip.home.lan:5033/") }
     static var username: String { value("UC_PREFILL_USERNAME", fallback: "alice") }
     static var password: String { value("UC_PREFILL_PASSWORD", fallback: "p4ssw0rd!") }
