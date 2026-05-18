@@ -360,7 +360,15 @@
 
     },
     "取消" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        }
+      }
     },
     "可能没有相机权限,或正在模拟器中运行" : {
 
@@ -455,7 +463,15 @@
 
     },
     "好" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        }
+      }
     },
     "完成" : {
       "extractionState" : "manual",
@@ -748,7 +764,15 @@
       }
     },
     "无法识别该二维码" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can't read this QR code"
+          }
+        }
+      }
     },
     "无法读取本机剪贴板" : {
       "extractionState" : "manual",
