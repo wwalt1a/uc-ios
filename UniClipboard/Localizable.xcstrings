@@ -1244,6 +1244,116 @@
           }
         }
       }
+    },
+    "扫描到 UniClipboard 配对二维码,确认添加此服务器吗?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanned a UniClipboard pairing QR code. Add this server?"
+          }
+        }
+      }
+    },
+    "地址" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Address"
+          }
+        }
+      }
+    },
+    "来源" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Source"
+          }
+        }
+      }
+    },
+    "设备" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device"
+          }
+        }
+      }
+    },
+    "这个二维码不属于 UniClipboard。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This QR code isn't a UniClipboard sync link."
+          }
+        }
+      }
+    },
+    "二维码版本是 v%lld,本 App 暂不支持,请更新 App。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR uses protocol v%lld, which this app version doesn't recognize yet."
+          }
+        }
+      }
+    },
+    "二维码声明的服务 \"%@\" 不是手机同步。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The QR's declared service \"%@\" is not mobile sync."
+          }
+        }
+      }
+    },
+    "二维码内容损坏,请在桌面端重新生成。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR payload is corrupted. Re-generate it on the desktop."
+          }
+        }
+      }
+    },
+    "二维码缺少必需字段 \"%@\",请在桌面端重新生成。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR is missing required field \"%@\". Re-generate it on the desktop."
+          }
+        }
+      }
+    },
+    "二维码里的服务地址不合法。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR contains an invalid server URL."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

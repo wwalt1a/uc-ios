@@ -21,13 +21,46 @@ struct ContentView: View {
     }
 
     var body: some View {
-        if vm.servers.configs.isEmpty {
-            SetupFlowView(vm: vm) {
-                // No-op: ContentView re-renders to TabView once configs is non-empty.
+        Group {
+            if vm.servers.configs.isEmpty {
+                SetupFlowView(vm: vm) {
+                    // No-op: ContentView re-renders to TabView once configs is non-empty.
+                }
+                .tint(.indigo)
+            } else {
+                mainTabs
             }
-            .tint(.indigo)
-        } else {
-            mainTabs
+        }
+        // `.onOpenURL` fires on the root regardless of which branch is on
+        // screen, including while a sheet/modal is up. The dispatcher in
+        // AppViewModel stages the parsed payload (or error) into
+        // observable state, and the relevant branch consumes it:
+        //   • Setup branch reads `pendingImport` via its own `.task(id:)`
+        //     and seeds the prefilled form step.
+        //   • Tabs branch shows `ConnectImportSheet` below.
+        .onOpenURL { vm.handleIncomingURL($0) }
+        // Confirmation sheet — only meaningful when configs is non-empty.
+        // While in Setup, the SetupFlowView's `.task(id:)` consumes
+        // `pendingImport` first, so the sheet binding never fires.
+        .sheet(item: $vm.pendingImport) { payload in
+            ConnectImportSheet(
+                payload: payload,
+                onConfirm: { vm.acceptPendingImport(payload) },
+                onCancel: { vm.pendingImport = nil }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .alert(
+            "无法识别该二维码",
+            isPresented: Binding(
+                get: { vm.importError != nil },
+                set: { if !$0 { vm.importError = nil } }
+            ),
+            presenting: vm.importError
+        ) { _ in
+            Button("好") { vm.importError = nil }
+        } message: { err in
+            Text(connectURIErrorMessage(err))
         }
     }
 

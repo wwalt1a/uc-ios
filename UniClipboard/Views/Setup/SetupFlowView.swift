@@ -27,6 +27,13 @@ struct SetupFlowView: View {
 
     enum Step: Hashable {
         case form
+        /// Form with the three credential fields pre-filled from a
+        /// `uniclipboard://connect?…` URI. The shape is the same as
+        /// `.form`; carrying the values through the path makes the step
+        /// poppable + restorable (NavigationStack tears down destinations
+        /// on pop, so `@State` defaults inside `ServerFormStepView` wouldn't
+        /// survive a back-and-forth).
+        case formPrefilled(url: String, username: String, password: String)
         case autoSwitch(name: String, url: String, username: String, password: String)
 
         static func initialPath() -> [Step] {
@@ -59,6 +66,14 @@ struct SetupFlowView: View {
                             name: $draftName,
                             existingNames: existingNames
                         )
+                    case .formPrefilled(let url, let username, let password):
+                        ServerFormStepView(
+                            name: $draftName,
+                            existingNames: existingNames,
+                            initialURL: url,
+                            initialUsername: username,
+                            initialPassword: password
+                        )
                     case .autoSwitch(let name, let url, let username, let password):
                         AutoSwitchStepView(
                             name: name,
@@ -71,6 +86,16 @@ struct SetupFlowView: View {
                         )
                     }
                 }
+        }
+        .task(id: vm.pendingImport) {
+            // QR landed via `.onOpenURL` (system Camera) while still in
+            // setup. Replace the nav path with the prefilled form — the
+            // user came from outside the app and shouldn't have to retrace
+            // Welcome → Form by hand. Seed `draftName` from the optional
+            // label so the alias field isn't empty after navigation.
+            guard let p = vm.consumePendingImport() else { return }
+            draftName = p.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            path = [.formPrefilled(url: p.url, username: p.user, password: p.pwd)]
         }
     }
 }
@@ -148,11 +173,35 @@ private struct ServerFormStepView: View {
     @Binding var name: String
     let existingNames: Set<String>
 
-    @State private var url: String = SetupPrefill.url
-    @State private var username: String = SetupPrefill.username
-    @State private var password: String = SetupPrefill.password
+    @State private var url: String
+    @State private var username: String
+    @State private var password: String
     @State private var trustInsecure: Bool = false
-    @State private var test: TestState = SetupPrefill.initialTestState
+    @State private var test: TestState
+
+    /// - Parameters:
+    ///   - initialURL/Username/Password: when non-nil, seed the form with
+    ///     these values and skip the `UC_PREFILL` env defaults. Used by
+    ///     `Step.formPrefilled` so a connect-URI scan from outside the app
+    ///     lands the user on a ready-to-test form. Initial test state is
+    ///     forced to `.idle` so the user explicitly presses "测试连接" — we
+    ///     don't want a stale `.success` ribbon implying the QR credentials
+    ///     were already verified.
+    init(
+        name: Binding<String>,
+        existingNames: Set<String>,
+        initialURL: String? = nil,
+        initialUsername: String? = nil,
+        initialPassword: String? = nil
+    ) {
+        _name = name
+        self.existingNames = existingNames
+        _url = State(initialValue: initialURL ?? SetupPrefill.url)
+        _username = State(initialValue: initialUsername ?? SetupPrefill.username)
+        _password = State(initialValue: initialPassword ?? SetupPrefill.password)
+        let prefilled = (initialURL != nil) || (initialUsername != nil) || (initialPassword != nil)
+        _test = State(initialValue: prefilled ? .idle : SetupPrefill.initialTestState)
+    }
 
     enum TestState: Equatable {
         case idle

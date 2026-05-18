@@ -94,6 +94,22 @@ final class AppViewModel {
     /// "已保存到 …" caption doesn't outlive its relevance.
     var lastSavedFileURL: URL?
 
+    /// Parsed `uniclipboard://connect?…` payload waiting for the user to
+    /// approve or reject. Set by `handleIncomingURL(_:)` when a connect
+    /// URI lands via `.onOpenURL` (system Camera) or any other URL
+    /// dispatcher. `ContentView` observes this:
+    ///  • configs empty → SetupFlow seeds the form fields and navigates.
+    ///  • configs non-empty → a confirmation sheet appears with a masked
+    ///    preview; the user appends the new server or dismisses.
+    /// Cleared via `consumePendingImport()` once the view has taken over.
+    var pendingImport: ConnectURI.Payload?
+
+    /// Last `ConnectURI.parse` failure surfaced from `handleIncomingURL`.
+    /// Drives a root-level alert so the user notices that the QR scanned
+    /// from the Camera app didn't actually do anything. Cleared on the
+    /// next successful URL or when the alert dismisses.
+    var importError: ConnectURI.ParseError?
+
     /// Display name of the most-recent successful `applyAttachment(for:)`
     /// — drives the bottom-banner "已复制 <name> 到剪贴板". Same
     /// transient-feedback lifecycle as `lastSavedFileURL`; cleared on the
@@ -179,6 +195,66 @@ final class AppViewModel {
     /// roaming network blip would discard a perfectly good cached hash.
     private func handleSSIDChanged() {
         engine?.handleEffectiveActiveChange()
+    }
+
+    /// Entry point for `.onOpenURL`. Parses the incoming URL as a
+    /// `uniclipboard://connect?…` URI; on success stages the payload in
+    /// `pendingImport` for the view layer to confirm, on failure stages
+    /// the error in `importError`. Non-`uniclipboard` schemes are not
+    /// the system's job to filter (the scheme registration only routes
+    /// `uniclipboard://`), but we still validate defensively so a future
+    /// dispatcher can call this with arbitrary URLs without breaking the
+    /// state machine.
+    func handleIncomingURL(_ url: URL) {
+        let raw = url.absoluteString
+        do {
+            let payload = try ConnectURI.parse(raw)
+            pendingImport = payload
+            importError = nil
+        } catch let e as ConnectURI.ParseError {
+            pendingImport = nil
+            importError = e
+        } catch {
+            // ConnectURI.parse only throws ParseError; this branch keeps
+            // the compiler happy and the state machine consistent.
+            pendingImport = nil
+            importError = .payloadDecodeFailed(detail: "\(error)")
+        }
+    }
+
+    /// Read-and-clear `pendingImport`. The setup flow calls this when it
+    /// finishes navigating to the prefilled form so a stale payload
+    /// doesn't trigger the path-replacement task on the next render.
+    func consumePendingImport() -> ConnectURI.Payload? {
+        let p = pendingImport
+        pendingImport = nil
+        return p
+    }
+
+    /// Append a connect-URI payload as a new `ServerConfig` and switch
+    /// to it. Called by `ConnectImportSheet` after the user confirms.
+    /// `label` becomes the human-friendly name; missing label falls back
+    /// to nil (the `displayLabel` getter handles URL-as-fallback per §5.1).
+    /// SSID auto-switch is not carried over from the QR — the connect URI
+    /// doesn't have a place for it and the user can edit later.
+    func acceptPendingImport(_ payload: ConnectURI.Payload) {
+        var list = servers
+        let name = payload.label.flatMap {
+            let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        let config = ServerConfig(
+            id: UUID().uuidString.lowercased(),
+            name: name,
+            url: payload.url,
+            username: payload.user,
+            password: payload.pwd,
+            autoSwitchWifiNames: []
+        )
+        list.configs.append(config)
+        list.activeConfigId = config.id
+        servers = list
+        pendingImport = nil
     }
 
     /// Re-read the device pasteboard. Triggered by toolbar refresh and

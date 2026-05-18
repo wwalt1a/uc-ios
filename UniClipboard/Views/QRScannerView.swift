@@ -5,6 +5,10 @@ import VisionKit
 /// Payload decoded from a UniClipboard server-config QR code.
 ///
 /// Accepted formats (in priority order):
+/// - Connect URI: `uniclipboard://connect?v=1&svc=mobile-sync&p=<base64url>`
+///   — the canonical format minted by the desktop's mobile-sync pairing
+///   menu. Parsed by `ConnectURI`; the optional `o.label` is mapped to
+///   `name` so the SetupFlow seeds a human-friendly alias.
 /// - JSON object: `{"url":"…","username":"…","password":"…","name":"…?"}`
 ///   — `name` is optional. Extra fields are tolerated for forward
 ///   compatibility (decoder ignores them).
@@ -12,7 +16,9 @@ import VisionKit
 ///   `url` is reconstructed without the userinfo segment.
 ///
 /// Anything else fails parsing; the scanner shows an inline alert and keeps
-/// scanning.
+/// scanning. A malformed connect URI does **not** fall through to the
+/// legacy paths — it's still a UniClipboard QR, just a broken one, and
+/// pretending otherwise would hide the bug.
 struct ServerQRPayload: Codable, Equatable, Sendable {
     var name: String?
     var url: String
@@ -23,7 +29,15 @@ struct ServerQRPayload: Codable, Equatable, Sendable {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        // JSON first — most useful format because it can carry an alias.
+        // Primary path: connect URI from the desktop.
+        if trimmed.lowercased().hasPrefix("uniclipboard://") {
+            guard let p = try? ConnectURI.parse(trimmed) else { return nil }
+            return ServerQRPayload(
+                name: p.label, url: p.url, username: p.user, password: p.pwd
+            )
+        }
+
+        // JSON fallback — older desktops / hand-written QRs.
         if let data = trimmed.data(using: .utf8),
            let payload = try? JSONDecoder().decode(ServerQRPayload.self, from: data),
            !payload.url.isEmpty,
