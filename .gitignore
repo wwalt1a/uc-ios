@@ -1,18 +1,8 @@
-# Xcode
-xcuserdata/
-*.xcuserstate
-DerivedData/
-
-# SwiftPM
-.build/
-.swiftpm/
-Packages/
-Package.resolved
-
-# macOS
+node_modules
+.next
+out
 .DS_Store
-UniClipboard.xcodeproj/xcuserdata
-
-# Debug-runtime artifact: App Group plist pulled out via simctl recipe
-# (see CLAUDE.md "Local stub server"). Not source.
-devices/
+*.tsbuildinfo
+next-env.d.ts
+.env*.local
+.build
