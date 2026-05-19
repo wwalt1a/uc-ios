@@ -70,7 +70,7 @@ struct SettingsView: View {
                     HStack {
                         Label("下载路径", systemImage: "folder")
                         Spacer()
-                        Text(vm.appSettings.downloadRelativePath.isEmpty ? "默认" : vm.appSettings.downloadRelativePath)
+                        Text(vm.appSettings.downloadRelativePath.isEmpty ? String(localized: "默认") : vm.appSettings.downloadRelativePath)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -826,6 +826,13 @@ private struct AboutView: View {
             Section {
                 LabeledContent("版本", value: "UniClipboard 1.0 (1)")
                 LabeledContent("协议", value: "兼容 SyncClipboard v1")
+            }
+            Section {
+                Link(destination: URL(string: "https://github.com/UniClipboard/UniClipboard")!) {
+                    Label("项目主页", systemImage: "globe")
+                }
+            } footer: {
+                Text("查看服务器部署指南、桌面端下载与使用文档。")
             }
             if let v = appSettings.ignoredVersion {
                 Section("忽略的版本") {

@@ -103,6 +103,8 @@ struct SetupFlowView: View {
 // MARK: - Step 1 · Welcome
 
 private struct WelcomeStepView: View {
+    @Environment(\.openURL) private var openURL
+
     var body: some View {
         ZStack {
             LinearGradient(
@@ -149,7 +151,9 @@ private struct WelcomeStepView: View {
                     .controlSize(.large)
 
                     Button {
-                        // open docs in real flow
+                        if let url = URL(string: "https://github.com/UniClipboard/UniClipboard") {
+                            openURL(url)
+                        }
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "questionmark.circle")

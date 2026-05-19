@@ -2,7 +2,8 @@
   "sourceLanguage" : "zh-Hans",
   "strings" : {
     "·" : {
-
+      "extractionState" : "manual",
+      "shouldTranslate" : false
     },
     "（未命名）" : {
       "extractionState" : "manual",
@@ -16,10 +17,26 @@
       }
     },
     "「%@」是最后一台服务器。删除后将返回首次设置流程。" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\" is your last server. Deleting it returns you to first-run setup."
+          }
+        }
+      }
     },
     "「%@」是当前活动服务器。删除后将自动切换到列表中剩余的服务器。" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\" is the active server. Deleting it switches to another server in the list."
+          }
+        }
+      }
     },
     "%lld 个" : {
       "extractionState" : "manual",
@@ -55,13 +72,23 @@
       }
     },
     "7 天内" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last 7 days"
+          }
+        }
+      }
     },
     "https://your-server.com:5033/" : {
-
+      "extractionState" : "manual",
+      "shouldTranslate" : false
     },
     "INFO" : {
-
+      "extractionState" : "manual",
+      "shouldTranslate" : false
     },
     "Pulled clipboard from server (%lld min ago)" : {
       "extractionState" : "manual",
@@ -121,8 +148,71 @@
       "extractionState" : "manual",
       "shouldTranslate" : false
     },
+    "二维码内容损坏,请在桌面端重新生成。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR payload is corrupted. Re-generate it on the desktop."
+          }
+        }
+      }
+    },
+    "二维码声明的服务 \"%@\" 不是手机同步。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The QR's declared service \"%@\" is not mobile sync."
+          }
+        }
+      }
+    },
+    "二维码版本是 v%lld,本 App 暂不支持,请更新 App。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR uses protocol v%lld, which this app version doesn't recognize yet."
+          }
+        }
+      }
+    },
+    "二维码缺少必需字段 \"%@\",请在桌面端重新生成。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR is missing required field \"%@\". Re-generate it on the desktop."
+          }
+        }
+      }
+    },
+    "二维码里的服务地址不合法。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "QR contains an invalid server URL."
+          }
+        }
+      }
+    },
     "仅复制文本" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy text only"
+          }
+        }
+      }
     },
     "仅本机缓存。服务器只保留最新一份。" : {
       "extractionState" : "manual",
@@ -136,6 +226,17 @@
       }
     },
     "今天" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today"
+          }
+        }
+      }
+    },
+    "从 UniClipboard 服务器拉取最新的剪贴板内容,写入到本机剪贴板。" : {
 
     },
     "从下方推送你的第一份内容" : {
@@ -150,10 +251,26 @@
       }
     },
     "从二维码填充" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill from QR code"
+          }
+        }
+      }
     },
     "从历史中删除" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove from history"
+          }
+        }
+      }
     },
     "从文件导入" : {
       "extractionState" : "manual",
@@ -167,7 +284,15 @@
       }
     },
     "位置权限未授予" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Location permission denied"
+          }
+        }
+      }
     },
     "便于辨识的名称" : {
       "extractionState" : "manual",
@@ -192,13 +317,30 @@
       }
     },
     "保存到 Documents" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save to Documents"
+          }
+        }
+      }
     },
     "保存失败" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save failed"
+          }
+        }
+      }
     },
     "保存失败:" : {
       "extractionState" : "manual",
+      "generatesSymbol" : false,
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -231,10 +373,26 @@
       }
     },
     "关闭" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close"
+          }
+        }
+      }
     },
     "其他" : {
       "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other"
+          }
+        }
+      },
       "shouldTranslate" : false
     },
     "兼容 SyncClipboard v1" : {
@@ -293,10 +451,26 @@
       }
     },
     "切换服务器 · 已根据 WiFi 自动切换" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server switched · auto-switched by Wi-Fi"
+          }
+        }
+      }
     },
     "刚刚" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Just now"
+          }
+        }
+      }
     },
     "删除" : {
       "extractionState" : "manual",
@@ -310,7 +484,15 @@
       }
     },
     "删除服务器" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete server"
+          }
+        }
+      }
     },
     "剪贴板" : {
       "extractionState" : "manual",
@@ -322,6 +504,9 @@
           }
         }
       }
+    },
+    "剪贴板为空,没有可发送的内容" : {
+
     },
     "协议" : {
       "extractionState" : "manual",
@@ -357,6 +542,20 @@
       }
     },
     "去设置" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Settings"
+          }
+        }
+      }
+    },
+    "发送" : {
+
+    },
+    "发送剪贴板" : {
 
     },
     "取消" : {
@@ -371,7 +570,15 @@
       }
     },
     "可能没有相机权限,或正在模拟器中运行" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Camera permission may be missing, or you are running in the Simulator"
+          }
+        }
+      }
     },
     "同步" : {
       "extractionState" : "manual",
@@ -440,7 +647,26 @@
       }
     },
     "在系统设置中开启「位置」权限以读取当前 WiFi" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable \"Location\" permission in Settings to read the current Wi-Fi"
+          }
+        }
+      }
+    },
+    "地址" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Address"
+          }
+        }
+      }
     },
     "基本" : {
       "extractionState" : "manual",
@@ -454,13 +680,37 @@
       }
     },
     "复制" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy"
+          }
+        }
+      }
     },
     "复制任何内容会自动同步" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anything you copy will sync automatically"
+          }
+        }
+      }
     },
     "复制到本机" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy to device"
+          }
+        }
+      }
     },
     "好" : {
       "extractionState" : "manual",
@@ -496,7 +746,15 @@
       }
     },
     "将删除「%@」。此操作无法撤销。" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This will delete \"%@\". This action cannot be undone."
+          }
+        }
+      }
     },
     "将显示在剪贴板顶栏。留空会用服务器地址替代。" : {
       "extractionState" : "manual",
@@ -510,7 +768,15 @@
       }
     },
     "将服务器二维码对准框内" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Align the server QR code within the frame"
+          }
+        }
+      }
     },
     "局域网或自签名证书时勾选" : {
       "extractionState" : "manual",
@@ -524,10 +790,26 @@
       }
     },
     "局域网或自签名证书时勾选。此设置全局生效。" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable for LAN or self-signed certs. Applies to all servers."
+          }
+        }
+      }
     },
     "左滑可设为活动服务器或删除。自动切换：连接到匹配 SSID 时自动切换到该服务器。" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swipe left to set as active or delete. Auto-switch: this server is selected when you join a matching Wi-Fi network."
+          }
+        }
+      }
     },
     "已保存到 %@" : {
       "extractionState" : "manual",
@@ -539,6 +821,9 @@
           }
         }
       }
+    },
+    "已发送到 %@" : {
+
     },
     "已同步" : {
       "extractionState" : "manual",
@@ -552,6 +837,17 @@
       }
     },
     "已复制 %@ 到剪贴板" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copied %@ to clipboard"
+          }
+        }
+      }
+    },
+    "已接收最新内容到本机剪贴板" : {
 
     },
     "已添加" : {
@@ -621,7 +917,15 @@
       }
     },
     "开启后，服务器有新内容时会立即覆盖本机剪贴板；关闭则只在主页高亮提示，不修改剪贴板。" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When on, new server content immediately overwrites the device clipboard. When off, the Home tab highlights it without modifying the clipboard."
+          }
+        }
+      }
     },
     "开始配置" : {
       "extractionState" : "manual",
@@ -646,10 +950,26 @@
       }
     },
     "当前" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current"
+          }
+        }
+      }
     },
     "当前剪贴板" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current clipboard"
+          }
+        }
+      }
     },
     "当前网络" : {
       "extractionState" : "manual",
@@ -663,10 +983,26 @@
       }
     },
     "当前设备无法扫描二维码" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This device cannot scan QR codes"
+          }
+        }
+      }
     },
     "当前设备无法读取 WiFi 名称" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This device cannot read the Wi-Fi name"
+          }
+        }
+      }
     },
     "忽略的版本" : {
       "extractionState" : "manual",
@@ -691,12 +1027,50 @@
       }
     },
     "手动添加 WiFi 名称" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Wi-Fi name manually"
+          }
+        }
+      }
     },
     "打开设置" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Settings"
+          }
+        }
+      }
     },
     "扫一扫" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan QR Code"
+          }
+        }
+      }
+    },
+    "扫描到 UniClipboard 配对二维码,确认添加此服务器吗?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanned a UniClipboard pairing QR code. Add this server?"
+          }
+        }
+      }
+    },
+    "把这台设备当前的剪贴板发到 UniClipboard 服务器,供其他设备接收。" : {
 
     },
     "换一个名称" : {
@@ -711,13 +1085,43 @@
       }
     },
     "授权" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grant permission"
+          }
+        }
+      }
     },
     "授权位置以读取当前 WiFi" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grant location access to read the current Wi-Fi"
+          }
+        }
+      }
+    },
+    "接收" : {
+
+    },
+    "接收剪贴板" : {
 
     },
     "接收超时 — 请稍后重试" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Receive timeout — please retry"
+          }
+        }
+      }
     },
     "推送当前剪贴板" : {
       "extractionState" : "manual",
@@ -797,10 +1201,26 @@
       }
     },
     "无法连接 — 请检查网络和 URL" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cannot connect — check network and URL"
+          }
+        }
+      }
     },
     "无法连接服务器" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cannot reach the server"
+          }
+        }
+      }
     },
     "日志" : {
       "extractionState" : "manual",
@@ -814,10 +1234,26 @@
       }
     },
     "昨天" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yesterday"
+          }
+        }
+      }
     },
     "更早" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Earlier"
+          }
+        }
+      }
     },
     "服务器" : {
       "extractionState" : "manual",
@@ -829,6 +1265,15 @@
           }
         }
       }
+    },
+    "服务器上还没有任何内容" : {
+
+    },
+    "服务器最新内容是文件或多类型组合,无法直接粘贴到剪贴板" : {
+
+    },
+    "服务器最新内容没有图像数据" : {
+
     },
     "服务器列表" : {
       "extractionState" : "manual",
@@ -853,22 +1298,70 @@
       }
     },
     "服务器地址无效" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid server address"
+          }
+        }
+      }
     },
     "服务器尚未发布剪贴板" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server has not published any clipboard yet"
+          }
+        }
+      }
     },
     "服务器已不存在" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server no longer exists"
+          }
+        }
+      }
     },
     "服务器有新内容" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New content on server"
+          }
+        }
+      }
     },
     "服务器返回 HTTP %lld" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server returned HTTP %lld"
+          }
+        }
+      }
     },
     "服务器返回的数据无法解析" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not parse server response"
+          }
+        }
+      }
     },
     "服务器还没有发布过剪贴板" : {
       "extractionState" : "manual",
@@ -893,10 +1386,26 @@
       }
     },
     "服务器错误 %lld" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server error %lld"
+          }
+        }
+      }
     },
     "未连接 WiFi" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not connected to Wi-Fi"
+          }
+        }
+      }
     },
     "未配置" : {
       "extractionState" : "manual",
@@ -938,6 +1447,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Device differs from server · ready to push."
+          }
+        }
+      }
+    },
+    "来源" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Source"
+          }
+        }
+      }
+    },
+    "查看服务器部署指南、桌面端下载与使用文档。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server setup guides, desktop client downloads, and full documentation."
+          }
+        }
+      }
+    },
+    "检测到同一份剪贴板内容在本机和服务器之间反复同步。点「重新启用」继续，或检查另一端的客户端是否也在自动同步同一份内容。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The same clipboard content kept bouncing between this device and the server. Tap Re-enable to continue, or check whether another client is also auto-syncing the same content."
           }
         }
       }
@@ -1042,7 +1584,15 @@
       }
     },
     "离线 · 重试中" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline · retrying"
+          }
+        }
+      }
     },
     "稍后设置" : {
       "extractionState" : "manual",
@@ -1056,7 +1606,15 @@
       }
     },
     "立即重试" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry now"
+          }
+        }
+      }
     },
     "管理服务器" : {
       "extractionState" : "manual",
@@ -1081,7 +1639,15 @@
       }
     },
     "自动写入本机剪贴板" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-write to device clipboard"
+          }
+        }
+      }
     },
     "自动切换" : {
       "extractionState" : "manual",
@@ -1116,6 +1682,17 @@
         }
       }
     },
+    "自动同步已暂停" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-sync paused"
+          }
+        }
+      }
+    },
     "行为" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1128,7 +1705,15 @@
       }
     },
     "认证失败" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Authentication failed"
+          }
+        }
+      }
     },
     "认证失败 — 检查用户名和密码" : {
       "extractionState" : "manual",
@@ -1142,7 +1727,15 @@
       }
     },
     "认证失败 — 请检查用户名和密码" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Authentication failed — check username and password"
+          }
+        }
+      }
     },
     "设为活动" : {
       "extractionState" : "manual",
@@ -1151,6 +1744,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Set Active"
+          }
+        }
+      }
+    },
+    "设备" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device"
           }
         }
       }
@@ -1177,6 +1781,9 @@
         }
       }
     },
+    "请先在 UniClipboard 中添加一台服务器" : {
+
+    },
     "请填写 URL、用户名和密码" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1189,126 +1796,34 @@
       }
     },
     "请检查用户名和密码是否正确。修改后会自动重新同步。" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check that the username and password are correct. Sync resumes automatically after editing."
+          }
+        }
+      }
     },
     "还没有同步过剪贴板" : {
-
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No clipboard synced yet"
+          }
+        }
+      }
     },
     "还没有服务器" : {
-
-    },
-    "连接" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connection"
-          }
-        }
-      }
-    },
-    "连接到这里的任一 SSID 时，会自动切换到该服务器。" : {
-
-    },
-    "连接超时 — 请检查服务器地址" : {
-
-    },
-    "通过 UniClipboard 服务器同步" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Synced through your UniClipboard server"
-          }
-        }
-      }
-    },
-    "默认" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Default"
-          }
-        }
-      }
-    },
-    "自动同步已暂停" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Auto-sync paused"
-          }
-        }
-      }
-    },
-    "重新启用" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Re-enable"
-          }
-        }
-      }
-    },
-    "检测到同一份剪贴板内容在本机和服务器之间反复同步。点「重新启用」继续，或检查另一端的客户端是否也在自动同步同一份内容。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The same clipboard content kept bouncing between this device and the server. Tap Re-enable to continue, or check whether another client is also auto-syncing the same content."
-          }
-        }
-      }
-    },
-    "扫描到 UniClipboard 配对二维码,确认添加此服务器吗?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scanned a UniClipboard pairing QR code. Add this server?"
-          }
-        }
-      }
-    },
-    "地址" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Address"
-          }
-        }
-      }
-    },
-    "来源" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Source"
-          }
-        }
-      }
-    },
-    "设备" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Device"
+            "value" : "No servers added yet"
           }
         }
       }
@@ -1324,61 +1839,83 @@
         }
       }
     },
-    "二维码版本是 v%lld,本 App 暂不支持,请更新 App。" : {
+    "连接" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "QR uses protocol v%lld, which this app version doesn't recognize yet."
+            "value" : "Connection"
           }
         }
       }
     },
-    "二维码声明的服务 \"%@\" 不是手机同步。" : {
+    "连接到这里的任一 SSID 时，会自动切换到该服务器。" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The QR's declared service \"%@\" is not mobile sync."
+            "value" : "This server activates when you join any of these Wi-Fi networks."
           }
         }
       }
     },
-    "二维码内容损坏,请在桌面端重新生成。" : {
+    "连接超时 — 请检查服务器地址" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "QR payload is corrupted. Re-generate it on the desktop."
+            "value" : "Connect timeout — check the server address"
           }
         }
       }
     },
-    "二维码缺少必需字段 \"%@\",请在桌面端重新生成。" : {
+    "通过 UniClipboard 服务器同步" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "QR is missing required field \"%@\". Re-generate it on the desktop."
+            "value" : "Synced through your UniClipboard server"
           }
         }
       }
     },
-    "二维码里的服务地址不合法。" : {
+    "重新启用" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "QR contains an invalid server URL."
+            "value" : "Re-enable"
+          }
+        }
+      }
+    },
+    "项目主页" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Project Home"
+          }
+        }
+      }
+    },
+    "默认" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default"
           }
         }
       }
     }
   },
-  "version" : "1.0"
+  "version" : "1.1"
 }
