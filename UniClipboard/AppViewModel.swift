@@ -477,6 +477,36 @@ final class AppViewModel {
         }
     }
 
+    /// Fetch a history row's payload bytes via §2.11 for read-only preview
+    /// rendering. Does not touch the clipboard, the filesystem, or any
+    /// view-model banner state — the preview sheet owns its own loading /
+    /// error UI. Used by `ClipboardPreviewSheet` to render full-resolution
+    /// images and long-text overflow bodies on tap.
+    ///
+    /// Verifies the bytes against `entry.hash` per §4.4 so a corrupted
+    /// download surfaces as `.hashMismatch` instead of a broken image or
+    /// mojibake'd text. Live-latest (no hash, no `dataName`) falls through
+    /// to §2.4 `GET /file/<dataName>` for the long-text inline path.
+    func fetchPreviewBytes(for item: ClipboardHistoryItem) async throws -> Data {
+        let entry = item.entry
+        guard entry.hasData, let dataName = entry.dataName else {
+            throw SyncError(kind: .notFound, underlying: "entry has no payload")
+        }
+        guard let server = effectiveActiveConfig else {
+            throw SyncError(kind: .invalidURL, underlying: "no active server")
+        }
+        let client = try SyncClipboardClient(server: server, trustInsecureCert: appSettings.trustInsecureCert)
+        let bytes: Data
+        if let hash = entry.hash, !hash.isEmpty {
+            let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
+            bytes = try await client.getHistoryPayload(profileId: profileId)
+        } else {
+            bytes = try await client.getFile(name: dataName)
+        }
+        try Self.verify(bytes: bytes, against: entry)
+        return bytes
+    }
+
     /// Download a history row's payload bytes (§2.11) and write them to
     /// `Documents/<sanitized downloadRelativePath>/<dataName>`.
     ///

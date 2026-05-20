@@ -199,6 +199,10 @@ When you encounter a SwiftUI initializer that takes a Swift `String` value (not 
 
 If two distinct Chinese strings collide on a single English translation (e.g., the app uses 服务器 in two roles), split them in the Swift code with different keys before adding to the catalog. The current split: `服务器列表` → "Servers" (the list page), `服务器` → "Server" (the badge on the home card).
 
+## Theme gotchas
+
+**`.buttonStyle(.borderedProminent)` needs an explicit foreground.** AccentColor's dark-mode variant is ivory (#F4F2EE), so SwiftUI's default white label disappears against the tint. Every `.borderedProminent` button in this codebase sets `.foregroundStyle(Color(.systemBackground))` on its Label — that flips with appearance and lands on a contrasting tone in both modes. Grep `borderedProminent` before merging any new button; missing this is a recurring regression. Same rule applies to anything else painted on top of `Color.accentColor` (custom capsules, banners, etc.).
+
 ## Mock data, briefly
 
 `Mock.swift` is a single namespace `enum Mock` with `servers`, `serverLatest`, `deviceClipboard`, and `history`. The latter is `[ClipboardHistoryItem]` (provenance-tagged Clipboards with timestamps and direction). `ClipboardHistoryItem` is a UI-only type — it's not persisted by the protocol. Replace `Mock.*` references with real state when you wire the network layer; nothing else should need to change.

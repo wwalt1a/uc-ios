@@ -19,6 +19,12 @@ struct HomeView: View {
     @State private var showingErrorSheet: Bool =
         ProcessInfo.processInfo.environment["UC_OPEN_ISSUE_SHEET"] == "1"
 
+    /// History row selected for the preview sheet. Item-driven sheet (not
+    /// a boolean) so the sheet's content is bound to the chosen row even
+    /// if the user taps a different row before the prior sheet finishes
+    /// dismissing.
+    @State private var previewItem: ClipboardHistoryItem?
+
     private var engineState: SyncEngine.State { vm.engine.state }
     private var isExplicitlyRefreshing: Bool { vm.engine.isExplicitlyRefreshing }
 
@@ -84,6 +90,11 @@ struct HomeView: View {
                     .disabled(isExplicitlyRefreshing)
                 }
             }
+            .sheet(item: $previewItem) { item in
+                ClipboardPreviewSheet(item: item, vm: vm)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
             .sheet(isPresented: $showingErrorSheet) {
                 if let issue = currentIssue {
                     IssueDetailSheet(
@@ -121,17 +132,23 @@ struct HomeView: View {
                 ForEach(groupedHistory) { section in
                     Section {
                         ForEach(section.items) { item in
-                            ClipboardRow(
-                                item: item,
-                                isLatest: item.id == latestId
-                            )
-                            .padding(.vertical, 14)
-                            .padding(.horizontal, 14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                Color(.secondarySystemGroupedBackground),
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            )
+                            Button {
+                                previewItem = item
+                            } label: {
+                                ClipboardRow(
+                                    item: item,
+                                    isLatest: item.id == latestId
+                                )
+                                .padding(.vertical, 14)
+                                .padding(.horizontal, 14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    Color(.secondarySystemGroupedBackground),
+                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
                             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
