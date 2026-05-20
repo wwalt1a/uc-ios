@@ -58,7 +58,7 @@ struct SetupFlowView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            WelcomeStepView()
+            WelcomeStepView(onScanned: handleScanned(_:))
                 .navigationDestination(for: Step.self) { step in
                     switch step {
                     case .form:
@@ -98,12 +98,25 @@ struct SetupFlowView: View {
             path = [.formPrefilled(url: p.url, username: p.user, password: p.pwd)]
         }
     }
+
+    /// Shared landing point for both the Welcome in-app QR scanner and the
+    /// external `.onOpenURL` route — push the prefilled form, seed the
+    /// alias from the optional label. `ServerQRPayload` is the common
+    /// shape (ConnectURI's label is mapped to `name` upstream).
+    private func handleScanned(_ payload: ServerQRPayload) {
+        draftName = payload.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        path = [.formPrefilled(url: payload.url, username: payload.username, password: payload.password)]
+    }
 }
 
 // MARK: - Step 1 · Welcome
 
 private struct WelcomeStepView: View {
+    var onScanned: (ServerQRPayload) -> Void
+
     @Environment(\.openURL) private var openURL
+    @State private var scannerPresented: Bool =
+        ProcessInfo.processInfo.environment["UC_OPEN_SETUP_QR"] == "1"
 
     var body: some View {
         ZStack {
@@ -121,7 +134,7 @@ private struct WelcomeStepView: View {
                     Circle()
                         .fill(.indigo.gradient.opacity(0.18))
                         .frame(width: 168, height: 168)
-                    Image(systemName: "doc.on.clipboard.fill")
+                    Image(systemName: "qrcode.viewfinder")
                         .font(.system(size: 72, weight: .semibold))
                         .foregroundStyle(.indigo.gradient)
                 }
@@ -131,7 +144,7 @@ private struct WelcomeStepView: View {
                     Text("和其他设备共享剪贴板")
                         .font(.largeTitle.weight(.bold))
                         .multilineTextAlignment(.center)
-                    Text("通过 UniClipboard 服务器同步")
+                    Text("扫描桌面端的配对二维码,几秒钟完成连接")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -141,13 +154,27 @@ private struct WelcomeStepView: View {
                 Spacer()
 
                 VStack(spacing: 12) {
-                    NavigationLink(value: SetupFlowView.Step.form) {
-                        Text("开始配置")
-                            .font(.body.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
+                    Button {
+                        scannerPresented = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "qrcode.viewfinder")
+                            Text("扫描二维码添加")
+                                .font(.body.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    NavigationLink(value: SetupFlowView.Step.form) {
+                        Text("手动输入服务器信息")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.bordered)
                     .controlSize(.large)
 
                     Button {
@@ -162,12 +189,28 @@ private struct WelcomeStepView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     }
+                    .padding(.top, 4)
                 }
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 32)
         }
         .navigationBarHidden(true)
+        .fullScreenCover(isPresented: $scannerPresented) {
+            QRScannerView(
+                onScan: { payload in
+                    scannerPresented = false
+                    // Defer path replacement by one runloop tick so the
+                    // fullScreenCover finishes dismissing — stacking the
+                    // NavigationStack mutation on the same tick swallows
+                    // the transition and leaves the cover half-dismissed.
+                    DispatchQueue.main.async {
+                        onScanned(payload)
+                    }
+                },
+                onCancel: { scannerPresented = false }
+            )
+        }
     }
 }
 
