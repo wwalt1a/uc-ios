@@ -231,6 +231,14 @@ private struct ServerFormStepView: View {
     @State private var password: String
     @State private var trustInsecure: Bool = false
     @State private var test: TestState
+    /// Drives the button copy "测试连接" → "重新测试" once a real network
+    /// attempt has completed. Survives `resetTestOnEdit()` because editing
+    /// after a test is still "re-testing".
+    @State private var hasTestedOnce: Bool
+    /// Handle on the in-flight probe so edits + manual presses can cancel
+    /// the prior one. The Task itself guards against stale commits via
+    /// `Task.isCancelled` before writing back to `test`.
+    @State private var inflight: Task<Void, Never>? = nil
 
     /// - Parameters:
     ///   - initialURL/Username/Password: when non-nil, seed the form with
@@ -253,7 +261,17 @@ private struct ServerFormStepView: View {
         _username = State(initialValue: initialUsername ?? SetupPrefill.username)
         _password = State(initialValue: initialPassword ?? SetupPrefill.password)
         let prefilled = (initialURL != nil) || (initialUsername != nil) || (initialPassword != nil)
-        _test = State(initialValue: prefilled ? .idle : SetupPrefill.initialTestState)
+        let initialTest: TestState = prefilled ? .idle : SetupPrefill.initialTestState
+        _test = State(initialValue: initialTest)
+        // Env-driven screenshot modes (UC_PREFILL_TEST=success/...) seed a
+        // result already on screen, so the button must read "重新测试" from
+        // the start — there's no "first" test left to do.
+        let tested: Bool
+        switch initialTest {
+        case .success, .authFailed, .unreachable: tested = true
+        default: tested = false
+        }
+        _hasTestedOnce = State(initialValue: tested)
     }
 
     enum TestState: Equatable {
@@ -320,7 +338,7 @@ private struct ServerFormStepView: View {
                 statusRow
 
                 Button {
-                    Task { await runTest() }
+                    runTest()
                 } label: {
                     HStack {
                         if test == .connecting {
@@ -328,29 +346,38 @@ private struct ServerFormStepView: View {
                             Text("正在连接…")
                         } else {
                             Image(systemName: "bolt.horizontal.circle")
-                            Text("测试连接")
+                            Text(hasTestedOnce ? "重新测试" : "测试连接")
                         }
                         Spacer()
                     }
                 }
                 .disabled(test == .connecting)
-
-                if test == .success {
-                    NavigationLink(
-                        value: SetupFlowView.Step.autoSwitch(
-                            name: name, url: url, username: username, password: password
-                        )
-                    ) {
-                        HStack {
-                            Text("继续")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.tint)
-                            Spacer()
-                        }
-                    }
-                }
             } header: {
                 Text("连接")
+            } footer: {
+                if test == .unreachable {
+                    permissionHintFooter
+                }
+            }
+
+            // "继续" sits in its own Section so the test action and the
+            // navigation action aren't visually coupled. Rendered always —
+            // disabled until a passing test — so the path forward is
+            // visible from the moment the form opens.
+            Section {
+                NavigationLink(
+                    value: SetupFlowView.Step.autoSwitch(
+                        name: name, url: url, username: username, password: password
+                    )
+                ) {
+                    HStack {
+                        Text("继续")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.tint)
+                        Spacer()
+                    }
+                }
+                .disabled(test != .success)
             }
         }
         .navigationTitle("服务器配置")
@@ -362,7 +389,36 @@ private struct ServerFormStepView: View {
             if name.isEmpty {
                 name = ServerNameGenerator.generate(avoiding: existingNames)
             }
+            // Why not auto-fire the probe on QR landing: iOS Local Network
+            // permission is request-on-first-use, and the first attempted
+            // request *always* fails (the system prompts the user in
+            // parallel; the URLSession returns an error immediately, not
+            // after the dialog resolves). Auto-firing would mean the user
+            // taps Allow and still sees "无法连接" — confusing. So we let
+            // the user press "测试连接" themselves; that press is also what
+            // triggers the OS prompt the first time, with clear cause.
         }
+        // Editing a probe-relevant field invalidates the last result. Name
+        // is alias text and doesn't affect what the server returns.
+        .onChange(of: url) { _, _ in resetTestOnEdit() }
+        .onChange(of: username) { _, _ in resetTestOnEdit() }
+        .onChange(of: password) { _, _ in resetTestOnEdit() }
+        .onChange(of: trustInsecure) { _, _ in resetTestOnEdit() }
+    }
+
+    @ViewBuilder
+    private var permissionHintFooter: some View {
+        Button {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            (Text("如果刚才拒绝了本地网络权限,")
+                + Text("前往设置 ›").foregroundColor(.accentColor))
+                .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -401,7 +457,12 @@ private struct ServerFormStepView: View {
         }
     }
 
-    private func runTest() async {
+    private func runTest() {
+        // Cancel any prior probe before starting a new one. The Task below
+        // checks `Task.isCancelled` before committing so a late completion
+        // can't paint stale state over a user edit or a fresher result.
+        inflight?.cancel()
+
         // Short-circuit missingFields before showing the spinner so the
         // status label snaps to the hint without a brief "正在连接…" flash.
         let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -410,13 +471,30 @@ private struct ServerFormStepView: View {
             return
         }
         test = .connecting
-        let result = await ConnectionTester.test(
-            url: url,
-            username: username,
-            password: password,
-            trustInsecureCert: trustInsecure
-        )
-        test = TestState(result)
+        let probeURL = url
+        let probeUser = username
+        let probePwd = password
+        let probeTrust = trustInsecure
+        inflight = Task {
+            let result = await ConnectionTester.test(
+                url: probeURL,
+                username: probeUser,
+                password: probePwd,
+                trustInsecureCert: probeTrust
+            )
+            guard !Task.isCancelled else { return }
+            test = TestState(result)
+            hasTestedOnce = true
+        }
+    }
+
+    private func resetTestOnEdit() {
+        // Field changed → cached result no longer represents what the
+        // server would return now. Cancel any in-flight probe and drop the
+        // status. `hasTestedOnce` stays so the button keeps reading
+        // "重新测试" — the user is, in fact, re-testing.
+        inflight?.cancel()
+        if test != .idle { test = .idle }
     }
 }
 
@@ -470,6 +548,13 @@ private struct AutoSwitchStepView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                // Hide the inter-row hairline: the borderedProminent button
+                // is a CTA card, not a list cell. SwiftUI insets the
+                // separator to the leading edge of the row's content; with
+                // a centered .frame(maxWidth: .infinity) label that's the
+                // text's leading, leaving only the right half of the line
+                // visible between this row and 稍后设置.
+                .listRowSeparator(.hidden)
 
                 Button {
                     save()
@@ -479,6 +564,7 @@ private struct AutoSwitchStepView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .listRowSeparator(.hidden)
             }
         }
         .navigationTitle("自动切换 WiFi")

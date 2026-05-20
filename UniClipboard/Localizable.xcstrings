@@ -502,6 +502,17 @@
         }
       }
     },
+    "前往设置 ›" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Settings ›"
+          }
+        }
+      }
+    },
     "剪贴板" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -751,6 +762,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "OK"
+          }
+        }
+      }
+    },
+    "如果刚才拒绝了本地网络权限," : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "If you just denied local network access, "
           }
         }
       }
@@ -2027,6 +2049,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Re-enable"
+          }
+        }
+      }
+    },
+    "重新测试" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retest"
           }
         }
       }
