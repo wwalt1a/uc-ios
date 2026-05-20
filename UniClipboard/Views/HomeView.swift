@@ -125,11 +125,16 @@ struct HomeView: View {
                                 item: item,
                                 isLatest: item.id == latestId
                             )
-                            .listRowBackground(
-                                item.id == latestId
-                                    ? Color.accentColor.opacity(0.08)
-                                    : Color(.secondarySystemGroupedBackground)
+                            .padding(.vertical, 14)
+                            .padding(.horizontal, 14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                Color(.secondarySystemGroupedBackground),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                             )
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 if item.entry.type == .text {
                                     Button {
@@ -169,13 +174,17 @@ struct HomeView: View {
                         }
                     } header: {
                         Text(section.title)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.headline)
                             .foregroundStyle(.primary)
                             .textCase(nil)
+                            .padding(.top, 12)
+                            .padding(.bottom, 4)
                     }
                 }
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
+            .listRowSpacing(8)
+            .environment(\.defaultMinListHeaderHeight, 0)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if engineState == .hasNewUnwritten {
                     PendingBanner {
@@ -368,7 +377,6 @@ private struct ClipboardRow: View {
                 latestPill
             }
         }
-        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
     }
 
@@ -417,10 +425,10 @@ private struct ClipboardRow: View {
     private var latestPill: some View {
         Text("当前")
             .font(.caption2.weight(.semibold))
-            .foregroundStyle(.tint)
-            .padding(.horizontal, 7)
+            .foregroundStyle(Color(.systemBackground))
+            .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Color.accentColor.opacity(0.18), in: Capsule())
+            .background(Color.accentColor, in: Capsule())
             .accessibilityLabel(Text("当前剪贴板"))
     }
 }
