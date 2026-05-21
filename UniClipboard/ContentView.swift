@@ -152,9 +152,18 @@ struct ContentView: View {
                 // so a Wi-Fi flip while the app was backgrounded surfaces
                 // on the first foreground tick instead of one cycle later.
                 vm.ssidProvider.refresh()
+                vm.engine.isSceneInactive = false
                 vm.engine.start()
-            case .background: vm.engine.stop()
-            case .inactive:   break  // brief — Notification Center pull-down etc; keep ticking
+            case .background:
+                vm.engine.stop()
+            case .inactive:
+                // .inactive covers Control Center pull-down, incoming
+                // calls, app switcher previews, etc. The system
+                // pasteboard is still reachable, so we keep the loop
+                // running — but at a reduced cadence (5s) so a
+                // long-running .inactive (an answered call) doesn't
+                // burn battery on per-second polling.
+                vm.engine.isSceneInactive = true
             @unknown default: break
             }
         }

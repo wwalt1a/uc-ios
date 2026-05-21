@@ -51,6 +51,14 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
     /// the source of truth for that.
     private(set) var currentSSID: String?
 
+    /// Whether the current network path uses cellular. Read by
+    /// `SyncEngine` to gate the cache prefetch (cellular bytes are
+    /// precious; users opt in via Settings). Best-effort: updates
+    /// asynchronously off the NWPathMonitor callback, so a freshly-
+    /// flipped airplane mode can lag by a tick — acceptable, the
+    /// read-through fallback covers any miss.
+    private(set) var isCellular: Bool = false
+
     @ObservationIgnored
     private let manager: CLLocationManager
 
@@ -88,8 +96,10 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
         // NWPathMonitor catches Wi-Fi flips that CLLocationManager won't
         // notify on. The handler hops to MainActor before calling
         // `refresh()` to keep the @MainActor invariant.
-        self.pathMonitor.pathUpdateHandler = { [weak self] _ in
+        self.pathMonitor.pathUpdateHandler = { [weak self] path in
+            let cellular = path.usesInterfaceType(.cellular)
             Task { @MainActor [weak self] in
+                self?.isCellular = cellular
                 self?.refresh()
             }
         }

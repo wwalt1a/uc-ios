@@ -30,7 +30,10 @@ import UniClipboardModels
 /// `await` its value instead of starting a second download.
 public actor PayloadCache {
     private let directory: URL
-    private let maxBytes: Int
+    /// Disk cap. Mutable so the Settings UI can shrink/grow it at
+    /// runtime via `setMaxBytes(_:)`; the setter runs an immediate
+    /// eviction sweep so a shrink frees disk on the spot.
+    private var maxBytes: Int
     private let semaphore: Semaphore
     private var pending: [String: Task<Data, Error>] = [:]
 
@@ -43,6 +46,18 @@ public actor PayloadCache {
             withIntermediateDirectories: true
         )
     }
+
+    /// Update the cap and immediately evict if the new cap is below
+    /// current occupancy. No-op when the cap is unchanged.
+    public func setMaxBytes(_ newValue: Int) {
+        guard newValue != maxBytes else { return }
+        maxBytes = newValue
+        evictIfOverCapacity()
+    }
+
+    /// Read-only accessor for the current cap. Useful for tests and
+    /// for the Settings UI's "max bytes" readout.
+    public func currentMaxBytes() -> Int { maxBytes }
 
     /// Return cached bytes if present, `nil` otherwise. A hit also bumps the
     /// file's `contentModificationDate` to "now" so the LRU sweep treats this

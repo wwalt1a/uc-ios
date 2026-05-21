@@ -77,6 +77,8 @@ struct SettingsView: View {
                 }
             }
 
+            StorageSettingsSection(appSettings: $vm.appSettings)
+
             Section("诊断") {
                 NavigationLink {
                     LogsPlaceholderView()
@@ -816,6 +818,130 @@ private struct LogsPlaceholderView: View {
             }
         }
         .navigationTitle("日志")
+    }
+}
+
+// MARK: - Storage (PayloadCache)
+
+/// Settings section for the on-device payload cache: prefetch toggle,
+/// cellular gate, disk cap, and "current size + 清除" row.
+///
+/// Cache size is read async via `PayloadCache.totalSize()`. We populate
+/// once on appear and re-read after a purge — settings pages don't need
+/// live updates, so no polling.
+private struct StorageSettingsSection: View {
+    @Binding var appSettings: AppSettings
+
+    /// Discrete cap presets matching the Picker options. Stored in bytes
+    /// so the source of truth for the cap value is the same encoding the
+    /// rest of the codebase uses.
+    private static let capOptionsBytes: [Int] = [
+        50 * 1024 * 1024,
+        200 * 1024 * 1024,
+        500 * 1024 * 1024,
+        1000 * 1024 * 1024,
+    ]
+
+    @State private var sizeBytes: Int? = nil
+    @State private var showingPurgeConfirm = false
+    @State private var purging = false
+
+    var body: some View {
+        Section {
+            Toggle(isOn: $appSettings.prefetchAttachments) {
+                Label("预下载附件", systemImage: "icloud.and.arrow.down")
+            }
+            if appSettings.prefetchAttachments {
+                Toggle(isOn: $appSettings.prefetchOnCellular) {
+                    Label("蜂窝下也预下载", systemImage: "antenna.radiowaves.left.and.right")
+                }
+            }
+            Picker(selection: $appSettings.payloadCacheMaxBytes) {
+                ForEach(Self.capOptionsBytes, id: \.self) { bytes in
+                    Text(Self.formatCap(bytes)).tag(bytes)
+                }
+            } label: {
+                Label("缓存上限", systemImage: "externaldrive")
+            }
+            HStack {
+                Label("缓存占用", systemImage: "internaldrive")
+                Spacer()
+                Text(sizeLabel)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Button {
+                    showingPurgeConfirm = true
+                } label: {
+                    Text("清除")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.red)
+                .disabled(purging || (sizeBytes ?? 0) == 0)
+            }
+        } header: {
+            Text("存储")
+        } footer: {
+            Text("开启预下载后，新内容会在后台静默缓存，点击预览无需等待。")
+                .font(.caption)
+        }
+        .task(id: refreshTrigger) {
+            await refreshSize()
+        }
+        .onChange(of: appSettings.payloadCacheMaxBytes) { _, newValue in
+            Task {
+                await PayloadCache.shared.setMaxBytes(newValue)
+                await refreshSize()
+            }
+        }
+        .alert("确认清除缓存?", isPresented: $showingPurgeConfirm) {
+            Button("取消", role: .cancel) {}
+            Button("清除", role: .destructive) {
+                purgeNow()
+            }
+        } message: {
+            Text("已下载的图片和长文本将被删除。下次查看时会重新下载。")
+        }
+    }
+
+    /// Bumped after purge to re-fire `.task(id:)` and refresh the size.
+    @State private var refreshTrigger = 0
+
+    private var sizeLabel: String {
+        if purging { return String(localized: "清除中…") }
+        guard let sizeBytes else { return "—" }
+        return Self.formatSize(sizeBytes)
+    }
+
+    private func refreshSize() async {
+        let bytes = await PayloadCache.shared.totalSize()
+        sizeBytes = bytes
+    }
+
+    private func purgeNow() {
+        Task {
+            purging = true
+            await PayloadCache.shared.purgeAll()
+            purging = false
+            refreshTrigger &+= 1
+        }
+    }
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f
+    }()
+
+    private static func formatSize(_ bytes: Int) -> String {
+        byteFormatter.string(fromByteCount: Int64(bytes))
+    }
+
+    private static func formatCap(_ bytes: Int) -> String {
+        // Discrete presets are exact MiB multiples, so render them as
+        // round integers rather than letting ByteCountFormatter pick
+        // "47.7 MB"-style decimals.
+        let mib = bytes / (1024 * 1024)
+        return "\(mib) MB"
     }
 }
 

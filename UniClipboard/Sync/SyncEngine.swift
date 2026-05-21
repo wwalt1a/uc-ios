@@ -113,9 +113,43 @@ final class SyncEngine {
     @ObservationIgnored
     var normalCadenceSeconds: Double = 1.0
 
-    /// Backoff applied when a tick errors out for network reasons.
+    /// Cadence applied while scene phase is `.inactive` — e.g. user
+    /// pulled down Notification Center, took an incoming call,
+    /// triggered the app switcher. The system pasteboard is still
+    /// reachable in this phase, so we don't want to stop the loop
+    /// entirely (a quick Control Center dismiss should resume sync
+    /// without a perceptible pause). But running at full 1Hz during a
+    /// minutes-long phone call wastes battery for no observable
+    /// progress, so we throttle to 5s. `.active` transitions restore
+    /// the 1Hz cadence on the next sleep.
+    @ObservationIgnored
+    var inactiveCadenceSeconds: Double = 5.0
+
+    /// Whether the engine should run at the reduced `inactiveCadenceSeconds`
+    /// cadence. Driven by the view layer's `scenePhase` observer.
+    @ObservationIgnored
+    var isSceneInactive: Bool = false
+
+    /// Initial backoff applied to the FIRST network error. Subsequent
+    /// consecutive errors double this up to `offlineBackoffMaxSeconds`
+    /// (with ±20% jitter applied per-tick). A successful tick resets the
+    /// backoff to this value. Public for tests that want to compress to
+    /// zero.
     @ObservationIgnored
     var offlineBackoffSeconds: Double = 5.0
+
+    /// Hard ceiling on the exponential backoff. 60s keeps a long
+    /// outage from extending past one minute between retries — long
+    /// enough to not hammer a dead server, short enough that a recovered
+    /// network surfaces in the UI within roughly a minute of reconnect.
+    @ObservationIgnored
+    var offlineBackoffMaxSeconds: Double = 60.0
+
+    /// Number of consecutive failed ticks. Drives the exponential
+    /// backoff. Cleared on any successful tick (set via
+    /// `markTickSucceeded`).
+    @ObservationIgnored
+    private var consecutiveFailures: Int = 0
 
     /// Minimum gap between successive §2.7 `POST /api/history/query`
     /// rounds. The live-clipboard tick runs every 1s, but the history
@@ -292,15 +326,51 @@ final class SyncEngine {
         switch state {
         case .authFailed:       return .infinity
         case .loopDetected:     return .infinity
-        case .offlineRetrying:  return offlineBackoffSeconds
-        default:                return normalCadenceSeconds
+        case .offlineRetrying:  return currentBackoffSeconds()
+        default:                return isSceneInactive ? inactiveCadenceSeconds : normalCadenceSeconds
         }
     }
 
+    /// Exponential backoff with ±20% jitter. `consecutiveFailures == 1`
+    /// → base; doubles up to `offlineBackoffMaxSeconds`. Jitter prevents
+    /// thundering-herd retry against a server that recovered at a known
+    /// moment. Reduced cadence is good for the server AND the device
+    /// battery; the UI's "重试中" indicator already conveys the wait.
+    private func currentBackoffSeconds() -> Double {
+        let failures = max(1, consecutiveFailures)
+        // 2^(failures-1) capped at 2^6 = 64× the base — anything past
+        // ~6 doublings overshoots the max anyway; the cap protects
+        // against Double overflow if failures grew pathologically.
+        let exponent = min(failures - 1, 6)
+        let multiplier = pow(2.0, Double(exponent))
+        let base = offlineBackoffSeconds * multiplier
+        let capped = min(base, offlineBackoffMaxSeconds)
+        let jitter = Double.random(in: 0.8 ... 1.2)
+        return capped * jitter
+    }
+
     private func tick(explicit: Bool = false) async {
-        guard !isTicking else { return }
+        if explicit {
+            // An explicit refresh must NOT be dropped by the `isTicking`
+            // guard — the toolbar/pull-to-refresh spinner depends on
+            // `isExplicitlyRefreshing` going true synchronously, and if a
+            // routine tick happens to be in flight when the user taps,
+            // we'd otherwise leave them staring at a static UI for up to
+            // the network timeout.
+            //
+            // Show the spinner immediately, then wait for any in-flight
+            // routine tick to finish before starting ours. Polling sleep
+            // (50ms) is fine: routine ticks are short by design (<1s
+            // typically), and we yield the actor between iterations so
+            // the routine tick can actually progress.
+            isExplicitlyRefreshing = true
+            while isTicking {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        } else {
+            guard !isTicking else { return }
+        }
         isTicking = true
-        if explicit { isExplicitlyRefreshing = true }
         defer {
             isTicking = false
             if explicit { isExplicitlyRefreshing = false }
@@ -353,6 +423,11 @@ final class SyncEngine {
             // clipboard, and the live tick above is the user-visible
             // sync signal.
             await runHistorySyncIfDue(client: client, vm: vm)
+            // Any path that reached here (apply-success, push-success,
+            // device==nil pass-through, hash-equal pass-through) is a
+            // healthy tick — drop the backoff counter so a recovered
+            // network reverts to 1Hz cadence on the next sleep.
+            consecutiveFailures = 0
         } catch let e as SyncError where e.kind == .authFailed {
             state = .authFailed
             lastError = e
@@ -360,9 +435,11 @@ final class SyncEngine {
         } catch let e as SyncError {
             state = .offlineRetrying
             lastError = e
+            consecutiveFailures += 1
         } catch {
             state = .offlineRetrying
             lastError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+            consecutiveFailures += 1
         }
     }
 
@@ -373,7 +450,16 @@ final class SyncEngine {
     ) async throws {
         // Dedup: if we already fetched this hash and the user just hasn't
         // flipped auto-apply yet, skip the bytes round-trip.
-        let alreadyStaged = stagedServerHash.map { hashesEqual($0, entry.hash) } ?? false
+        //
+        // Hashless server entries (spec violation — §4 requires SHA-256)
+        // dedup by full-Clipboard equality against `stagedEntry`. Without
+        // this, `lastSyncedContentHash` never advances (advanceSynced
+        // guards on non-nil hash), so the main router always re-enters
+        // here and we'd re-append + re-prefetch every tick.
+        let entryHasHash = !(entry.hash ?? "").isEmpty
+        let alreadyStaged: Bool = entryHasHash
+            ? (stagedServerHash.map { hashesEqual($0, entry.hash) } ?? false)
+            : (stagedEntry == entry)
         if !alreadyStaged {
             vm.serverLatest = entry
             // First time we see this server entry — log it on the Home
@@ -381,13 +467,39 @@ final class SyncEngine {
             // re-observation of the same hash, so we'd otherwise double
             // log every tick the user leaves auto-apply off.
             vm.appendHistory(entry: entry, direction: .pulled)
+            // Prefetch the payload bytes into PayloadCache so a later
+            // tap-to-preview opens without a network round-trip. The
+            // helper short-circuits on cellular (unless the user opted
+            // in) and on entries without a stable cache key. The
+            // device-apply path below races safely — PayloadCache's
+            // per-profileId `pending` table dedups in-flight fetches.
+            vm.prefetchAttachmentIfEligible(entry)
         }
-        if vm.appSettings.autoApplyServerChanges {
-            // Reuse vm.applyServerToDevice — it handles text-short / text-long /
-            // image branches and pasteboard.write. It reads vm.serverLatest, so
-            // make sure the latest is set above.
-            await vm.applyServerToDevice()
-            if let err = vm.applyError {
+        if vm.appSettings.autoApplyServerChanges && entryHasHash {
+            // Auto-apply requires a hash. Hashless entries always fall
+            // into the stage-only branch below so the user can decide
+            // (the manual apply path likely fails verification anyway,
+            // but that's a UI / server-bug surfacing concern, not a
+            // reason for the engine to loop forever).
+            //
+            // Reuse the throwing apply variant so this path doesn't
+            // depend on the sticky `vm.applyError` field — that field
+            // can outlive a single tick when the UI's "应用" button
+            // failed earlier, and reading it after the call would
+            // mis-attribute that prior error to the engine.
+            do {
+                _ = try await vm.applyServerToDeviceThrowing()
+            } catch let err as SyncError {
+                // Park the entry in the staged slot so the next tick goes
+                // through the `alreadyStaged` short-circuit — without this,
+                // every subsequent tick re-runs `vm.serverLatest = entry`
+                // + `prefetchAttachmentIfEligible` for the same (failed)
+                // entry. `appendHistory` already dedups via the last-hash
+                // check, but the prefetch/serverLatest churn is wasted
+                // work. State stays at .offlineRetrying via the outer
+                // catch so the user sees the failure.
+                stagedServerHash = entry.hash
+                stagedEntry = entry
                 throw err
             }
             advanceSynced(to: entry.hash)
@@ -399,7 +511,7 @@ final class SyncEngine {
             lastError = nil
             loopGuard.record(.pulled, hash: entry.hash)
             if loopGuard.tripped() { tripLoopBreaker() }
-        } else {
+        } else if !alreadyStaged {
             // Stage but don't write. Update stagedServerHash to dedup next
             // tick. lastSyncedContentHash stays where it was — until the
             // user toggles auto-apply on or copies something new locally,
@@ -410,6 +522,10 @@ final class SyncEngine {
             lastSyncedAt = .now
             lastError = nil
         }
+        // alreadyStaged && (auto-apply off || hashless) → no-op tick.
+        // Don't bump `lastSyncedAt` — the UI's "上次同步 N 秒前" should
+        // reflect actual progress, not every routine re-observation of
+        // an already-staged entry.
     }
 
     private func maybePush(
@@ -419,9 +535,11 @@ final class SyncEngine {
     ) async throws {
         guard let device = vm.deviceClipboard else {
             // Observer hasn't surfaced anything yet (cold start, env-hook
-            // returned nil, etc). Nothing to push.
+            // returned nil, etc). Nothing to push — and nothing to claim
+            // as a "sync" either, so leave `lastSyncedAt` where it was.
+            // Writing `.now` here surfaces a misleading "刚刚同步" while
+            // the device side has literally never been observed.
             state = .succeeded
-            lastSyncedAt = .now
             lastError = nil
             return
         }
@@ -447,18 +565,18 @@ final class SyncEngine {
             lastError = nil
             return
         }
-        // `vm.push()` early-returns silently if the pasteboard snapshot
-        // is nil or has an unpushable type — in that case nothing
-        // network-side happened, but `vm.serverLatest` is still the
-        // last-known good entry. Use `lastPushedAt` advancing as the
-        // canonical "a real push round-tripped" signal so we don't
-        // double-log the live entry as `.pushed`.
-        let prePushedAt = vm.lastPushedAt
-        await vm.push()
-        if let err = vm.pushError {
+        // `pushReturningEntry()` returns the pushed entry on success,
+        // nil on documented silent skips (no snapshot / unpushable type
+        // / in-flight isPushing), and throws on real failure — so the
+        // engine no longer has to look at `vm.pushError`, which is
+        // sticky and may carry an error from a prior UI-initiated push.
+        let pushed: Clipboard?
+        do {
+            pushed = try await vm.pushReturningEntry()
+        } catch let err as SyncError {
             throw err
         }
-        if vm.lastPushedAt != prePushedAt, let pushed = vm.serverLatest {
+        if let pushed {
             advanceSynced(to: pushed.hash)
             vm.appendHistory(entry: pushed, direction: .pushed)
             loopGuard.record(.pushed, hash: pushed.hash)

@@ -262,6 +262,9 @@ final class FixturesTests: XCTestCase {
             // Cycle 9 — auto-sync engine. Always encoded (Bool, no nil
             // semantics); fixture omits it and decode falls back to true.
             "autoApplyServerChanges",
+            // Cycle 12 — PayloadCache settings. Same Bool/Int defaulting
+            // rule: fixture omits them and decode falls back to defaults.
+            "prefetchAttachments", "prefetchOnCellular", "payloadCacheMaxBytes",
         ])
     }
 

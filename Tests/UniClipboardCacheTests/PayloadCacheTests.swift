@@ -218,6 +218,49 @@ final class PayloadCacheTests: XCTestCase {
         }
     }
 
+    // MARK: setMaxBytes (PR 3 — settings-driven cap)
+
+    func test_setMaxBytes_shrinkBelowOccupancy_evictsImmediately() async throws {
+        // Cap 1 MiB, write three 200-byte entries → total 600 ≤ cap. Then
+        // shrink to 250 bytes → expect oldest two evicted (only Image-C
+        // survives; 200 ≤ 250).
+        let cache = makeCache(maxBytes: 1_000_000)
+        try await cache.write(profileId: "Image-A", bytes: Data(repeating: 0x01, count: 200))
+        try await Task.sleep(for: .milliseconds(50))
+        try await cache.write(profileId: "Image-B", bytes: Data(repeating: 0x02, count: 200))
+        try await Task.sleep(for: .milliseconds(50))
+        try await cache.write(profileId: "Image-C", bytes: Data(repeating: 0x03, count: 200))
+
+        await cache.setMaxBytes(250)
+
+        let bytesA = await cache.read(profileId: "Image-A")
+        let bytesB = await cache.read(profileId: "Image-B")
+        let bytesC = await cache.read(profileId: "Image-C")
+        let cap = await cache.currentMaxBytes()
+        XCTAssertNil(bytesA)
+        XCTAssertNil(bytesB)
+        XCTAssertNotNil(bytesC)
+        XCTAssertEqual(cap, 250)
+    }
+
+    func test_setMaxBytes_grow_keepsAllEntries() async throws {
+        // Cap 600, write three 200-byte entries → exactly at cap. Then
+        // grow to 10 MiB → nothing evicted.
+        let cache = makeCache(maxBytes: 600)
+        try await cache.write(profileId: "Image-A", bytes: Data(repeating: 0x01, count: 200))
+        try await cache.write(profileId: "Image-B", bytes: Data(repeating: 0x02, count: 200))
+        try await cache.write(profileId: "Image-C", bytes: Data(repeating: 0x03, count: 200))
+
+        await cache.setMaxBytes(10 * 1024 * 1024)
+
+        let bytesA = await cache.read(profileId: "Image-A")
+        let bytesB = await cache.read(profileId: "Image-B")
+        let bytesC = await cache.read(profileId: "Image-C")
+        XCTAssertNotNil(bytesA)
+        XCTAssertNotNil(bytesB)
+        XCTAssertNotNil(bytesC)
+    }
+
     // MARK: key validation
 
     func test_invalidKey_writeThrows() async {

@@ -15,6 +15,12 @@ final class AppViewModel {
         didSet {
             store.saveServers(servers)
             engine?.handleServersChange(from: oldValue, to: servers)
+            // Keep the SSID-change baseline aligned with the new
+            // effective config — otherwise the next SSID notification
+            // would compare against a now-stale id and re-trigger a
+            // reset the engine already handled.
+            lastObservedEffectiveActiveId =
+                servers.resolveActiveConfig(currentSsid: ssidProvider.currentSSID)?.id
         }
     }
 
@@ -165,6 +171,12 @@ final class AppViewModel {
         self.historyWatermark = store.loadHistoryWatermark()
         self.ssidProvider = CurrentSSIDProvider()
         self.engine = SyncEngine(viewModel: self, store: store)
+        // Seed the snapshot off the cold-launch SSID so the first
+        // legitimate roaming flip is detected as a change, but a
+        // notification that fires with the same effective server (the
+        // common case for non-auto-switch users) is a no-op.
+        self.lastObservedEffectiveActiveId =
+            self.servers.resolveActiveConfig(currentSsid: self.ssidProvider.currentSSID)?.id
         // Drive engine state resets when a Wi-Fi flip changes the
         // effective server (§5.3). Captured weakly because the provider
         // outlives the engine reference inside `self`.
@@ -193,9 +205,23 @@ final class AppViewModel {
     /// Hook fired by `CurrentSSIDProvider.onSSIDChanged`. Resets engine
     /// runtime state only if the effective server changed — otherwise a
     /// roaming network blip would discard a perfectly good cached hash.
+    ///
+    /// The provider invokes this AFTER it has already mutated
+    /// `currentSSID`, so we can't compute the "before" effective config
+    /// in here. We track `lastObservedEffectiveActiveId` ourselves and
+    /// compare against the freshly-resolved one. Initialized in `init`
+    /// off the cold-launch SSID so the first roaming flip after launch
+    /// doesn't always wipe the cache.
     private func handleSSIDChanged() {
+        let new = effectiveActiveConfig?.id
+        let old = lastObservedEffectiveActiveId
+        lastObservedEffectiveActiveId = new
+        guard old != new else { return }
         engine?.handleEffectiveActiveChange()
     }
+
+    @ObservationIgnored
+    private var lastObservedEffectiveActiveId: String?
 
     /// Entry point for `.onOpenURL`. Parses the incoming URL as a
     /// `uniclipboard://connect?…` URI; on success stages the payload in
@@ -382,16 +408,28 @@ final class AppViewModel {
     /// raw bytes under the matching UTI. File/Group are no-ops — file
     /// bytes have no meaningful UIPasteboard target, group needs §4.3.
     func applyServerToDevice() async {
-        guard let entry = serverLatest else { return }
+        _ = try? await applyServerToDeviceThrowing()
+    }
+
+    /// Throwing variant of `applyServerToDevice()` used by `SyncEngine`.
+    /// Returns `true` when bytes actually landed on the pasteboard;
+    /// `false` for documented silent skips (file/group entry, no server,
+    /// no `dataName`, observer in-flight). Throws `SyncError` on a real
+    /// network/verify failure. UI-visible `applyError` is set/cleared in
+    /// the same shape as `applyServerToDevice()`, so the rest of the app
+    /// doesn't need to know which variant ran.
+    @discardableResult
+    func applyServerToDeviceThrowing() async throws -> Bool {
+        guard let entry = serverLatest else { return false }
         switch entry.type {
         case .text:
             if !entry.hasData {
                 pasteboard.write(text: entry.text)
                 applyError = nil
-                return
+                return true
             }
-            guard !isApplying else { return }
-            guard let server = effectiveActiveConfig, let dataName = entry.dataName else { return }
+            guard !isApplying else { return false }
+            guard let server = effectiveActiveConfig, let dataName = entry.dataName else { return false }
             isApplying = true
             defer { isApplying = false }
             do {
@@ -401,17 +439,21 @@ final class AppViewModel {
                 let text = String(decoding: bytes, as: UTF8.self)
                 pasteboard.write(text: text)
                 applyError = nil
+                return true
             } catch let e as SyncError {
                 applyError = e
+                throw e
             } catch {
-                applyError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+                let wrapped = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+                applyError = wrapped
+                throw wrapped
             }
         case .image:
             guard entry.hasData,
                   let dataName = entry.dataName,
                   let server = effectiveActiveConfig
-            else { return }
-            guard !isApplying else { return }
+            else { return false }
+            guard !isApplying else { return false }
             isApplying = true
             defer { isApplying = false }
             do {
@@ -420,13 +462,17 @@ final class AppViewModel {
                 try Self.verify(bytes: bytes, against: entry)
                 pasteboard.write(data: bytes, uti: Self.utiForDataName(dataName), originalName: dataName)
                 applyError = nil
+                return true
             } catch let e as SyncError {
                 applyError = e
+                throw e
             } catch {
-                applyError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+                let wrapped = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+                applyError = wrapped
+                throw wrapped
             }
         case .file, .group:
-            return
+            return false
         }
     }
 
@@ -615,6 +661,36 @@ final class AppViewModel {
         }
     }
 
+    /// Fire-and-forget cache prefetch for an incoming server entry.
+    /// No-op when prefetch is disabled, the path is cellular and the
+    /// user hasn't opted in, or the entry isn't a hash-tracked
+    /// attachment (image/text-long with a populated hash + dataName).
+    ///
+    /// Races safely with the device-apply read-through: `PayloadCache`'s
+    /// per-`profileId` `pending` table dedups, so at most one network
+    /// request goes out regardless of who wins the race.
+    func prefetchAttachmentIfEligible(_ entry: Clipboard) {
+        guard appSettings.prefetchAttachments else { return }
+        if ssidProvider.isCellular, !appSettings.prefetchOnCellular { return }
+        guard entry.hasData,
+              entry.type == .image || entry.type == .text,
+              let hash = entry.hash, !hash.isEmpty,
+              let dataName = entry.dataName,
+              let server = effectiveActiveConfig
+        else { return }
+        let trust = appSettings.trustInsecureCert
+        let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
+        Task.detached {
+            // Building the client is cheap (no I/O) — doing it inside
+            // the detached task keeps the MainActor caller off the
+            // URLSession code path.
+            guard let client = try? SyncClipboardClient(server: server, trustInsecureCert: trust) else { return }
+            _ = try? await PayloadCache.shared.fetchAndStore(profileId: profileId) {
+                try await client.getFile(name: dataName)
+            }
+        }
+    }
+
     /// Read-through cache for the §2.4 live-latest route
     /// (`GET /file/<dataName>`). Goes through `PayloadCache.shared` when
     /// `entry.hash` is present, bypasses for the rare hash-less legacy
@@ -730,11 +806,24 @@ extension AppViewModel {
     ///   metadata-only entry so the server card reflects reality without
     ///   a follow-up GET.
     func push() async {
-        guard !isPushing else { return }
-        guard let server = effectiveActiveConfig else { return }
+        _ = try? await pushReturningEntry()
+    }
+
+    /// Throwing variant of `push()` used by `SyncEngine` so it doesn't
+    /// have to second-guess the sticky `pushError` field. Returns the
+    /// pushed entry on success, `nil` when there's nothing to push
+    /// (no server, no snapshot, or unsupported type — all silent skips),
+    /// and throws `SyncError` on a real failure. Updates the same
+    /// observable surface (`pushError`, `lastPushedAt`, `serverLatest`)
+    /// as `push()` so UI bindings stay live regardless of which entry
+    /// point ran.
+    @discardableResult
+    func pushReturningEntry() async throws -> Clipboard? {
+        guard !isPushing else { return nil }
+        guard let server = effectiveActiveConfig else { return nil }
         guard let snapshot = pasteboard.snapshot(),
               snapshot.clipboard.type == .text || snapshot.clipboard.type == .image
-        else { return }
+        else { return nil }
         isPushing = true
         defer { isPushing = false }
         let trustInsecure = appSettings.trustInsecureCert
@@ -754,10 +843,14 @@ extension AppViewModel {
             lastPushedAt = .now
             pushError = nil
             refreshError = nil
+            return entry
         } catch let e as SyncError {
             pushError = e
+            throw e
         } catch {
-            pushError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+            let wrapped = SyncError(kind: .networkUnreachable, underlying: "\(error)")
+            pushError = wrapped
+            throw wrapped
         }
     }
 

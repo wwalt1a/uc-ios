@@ -268,5 +268,41 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(loaded.downloadRelativePath, AppSettings.defaults.downloadRelativePath)
         XCTAssertEqual(loaded.logViewLevelFilter, AppSettings.defaults.logViewLevelFilter)
         XCTAssertNil(loaded.ignoredVersion)
+        XCTAssertEqual(loaded.prefetchAttachments, AppSettings.defaults.prefetchAttachments)
+        XCTAssertEqual(loaded.prefetchOnCellular, AppSettings.defaults.prefetchOnCellular)
+        XCTAssertEqual(loaded.payloadCacheMaxBytes, AppSettings.defaults.payloadCacheMaxBytes)
+    }
+
+    // MARK: - T10: PayloadCache settings (PR 3)
+
+    func test_appSettings_payloadCacheFields_roundTripEqual() {
+        let store = makeStore()
+        let original = AppSettings(
+            prefetchAttachments: false,
+            prefetchOnCellular: true,
+            payloadCacheMaxBytes: 500 * 1024 * 1024
+        )
+        store.saveAppSettings(original)
+        let loaded = store.loadAppSettings()
+        XCTAssertEqual(loaded.prefetchAttachments, false)
+        XCTAssertEqual(loaded.prefetchOnCellular, true)
+        XCTAssertEqual(loaded.payloadCacheMaxBytes, 500 * 1024 * 1024)
+    }
+
+    func test_loadAppSettings_unknownKeysAreTolerated() throws {
+        // Older-schema reader meeting a newer-schema payload: unknown
+        // keys must be silently dropped, and the present keys honored.
+        let payload = """
+        {
+          "trustInsecureCert": true,
+          "prefetchAttachments": false,
+          "futureKnobFromTomorrow": 42
+        }
+        """
+        seed(Data(payload.utf8), forKey: AppSettings.PersistenceKey.appSettings)
+        let store = makeStore()
+        let loaded = store.loadAppSettings()
+        XCTAssertEqual(loaded.trustInsecureCert, true)
+        XCTAssertEqual(loaded.prefetchAttachments, false)
     }
 }
