@@ -225,12 +225,31 @@ struct HomeView: View {
                 // mutually cleared on each attempt (see AppViewModel),
                 // but if both ever co-exist save wins — it's the more
                 // expensive action so its feedback is more meaningful.
+                //
+                // Auto-dismiss after 3s: the engine's 1Hz tick bypasses
+                // `vm.refresh()` (which is the only clear path besides a
+                // new save/apply attempt), so without this the banner
+                // would stay pinned to the bottom indefinitely.
                 if let url = vm.lastSavedFileURL {
                     SavedBanner(filePath: displayPath(for: url))
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .task(id: url) {
+                            try? await Task.sleep(for: .seconds(3))
+                            guard !Task.isCancelled else { return }
+                            if vm.lastSavedFileURL == url {
+                                vm.lastSavedFileURL = nil
+                            }
+                        }
                 } else if let name = vm.lastAppliedAttachmentName {
                     AppliedBanner(name: name)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .task(id: name) {
+                            try? await Task.sleep(for: .seconds(3))
+                            guard !Task.isCancelled else { return }
+                            if vm.lastAppliedAttachmentName == name {
+                                vm.lastAppliedAttachmentName = nil
+                            }
+                        }
                 }
             }
             .animation(.snappy, value: engineState)
