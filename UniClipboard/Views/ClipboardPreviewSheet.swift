@@ -27,6 +27,19 @@ struct ClipboardPreviewSheet: View {
     /// after.
     @State private var payload: PayloadState = .idle
 
+    /// Cached decoded long-text body. Decoding `Data` → `String` once on
+    /// load() avoids re-running UTF-8 decode on every body re-render —
+    /// SwiftUI invalidates this view often (vm @Observable churn), and
+    /// re-decoding multi-MB payloads on the main thread is what makes
+    /// long-text preview feel frozen.
+    @State private var decodedText: String?
+
+    /// Hard cap on how many characters we actually hand to UITextView.
+    /// Above this we render a head slice plus a notice — TextKit's
+    /// layout cost grows with string length, and beyond ~200k chars the
+    /// initial layout pass starts to drop frames on the main thread.
+    private static let maxDisplayChars = 200_000
+
     private enum PayloadState {
         case idle
         case loading
@@ -159,16 +172,7 @@ struct ClipboardPreviewSheet: View {
     private var textContent: some View {
         if !item.entry.hasData {
             // Short text — `entry.text` is the full content per §3.1.
-            Text(item.entry.text)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(
-                    Color(.secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
+            textBubble(text: item.entry.text, dimmed: false)
         } else {
             // §3.4 long-text overflow — `entry.text` is just the first
             // 10240 chars; full body lives at `<dataName>`. Show whatever
@@ -177,15 +181,41 @@ struct ClipboardPreviewSheet: View {
         }
     }
 
+    /// Capped, selectable text block backed by UITextView. We bypass
+    /// SwiftUI `Text` for long bodies because its layout + selection
+    /// pipeline becomes noticeably janky beyond a few tens of thousands
+    /// of characters; UITextView with TextKit handles it cleanly.
+    @ViewBuilder
+    private func textBubble(text: String, dimmed: Bool) -> some View {
+        let (display, overflowChars) = capped(text)
+        VStack(alignment: .leading, spacing: 8) {
+            SelectableTextView(text: display, dimmed: dimmed)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if overflowChars > 0 {
+                Text("内容过长,仅显示前 \(Self.maxDisplayChars) 字符(余 \(overflowChars) 字符未显示)。可保存到 Documents 后查看完整内容。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .background(
+            Color(.secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+    }
+
+    private func capped(_ text: String) -> (String, Int) {
+        if text.count <= Self.maxDisplayChars { return (text, 0) }
+        let head = text.prefix(Self.maxDisplayChars)
+        return (String(head), text.count - Self.maxDisplayChars)
+    }
+
     @ViewBuilder
     private var longTextContent: some View {
         switch payload {
         case .idle, .loading:
             VStack(alignment: .leading, spacing: 12) {
-                Text(item.entry.text)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                SelectableTextView(text: cappedHead(item.entry.text), dimmed: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -200,25 +230,15 @@ struct ClipboardPreviewSheet: View {
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
 
-        case .loaded(let bytes):
-            let fullText = String(decoding: bytes, as: UTF8.self)
-            Text(fullText)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(
-                    Color(.secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
+        case .loaded:
+            // Use the cached decoded string; `String(decoding:as:)` on
+            // multi-MB Data is too expensive to redo each body pass.
+            textBubble(text: decodedText ?? item.entry.text, dimmed: false)
 
         case .failed(let err):
             VStack(alignment: .leading, spacing: 10) {
-                Text(item.entry.text)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
+                SelectableTextView(text: cappedHead(item.entry.text), dimmed: false)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 errorBanner(err)
             }
             .padding(14)
@@ -227,6 +247,10 @@ struct ClipboardPreviewSheet: View {
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
         }
+    }
+
+    private func cappedHead(_ text: String) -> String {
+        text.count <= Self.maxDisplayChars ? text : String(text.prefix(Self.maxDisplayChars))
     }
 
     // MARK: image
@@ -394,8 +418,17 @@ struct ClipboardPreviewSheet: View {
 
     private func load() async {
         payload = .loading
+        decodedText = nil
         do {
             let bytes = try await vm.fetchPreviewBytes(for: item)
+            // Decode text payloads once, off the render path. Image
+            // payloads stay as Data — UIImage(data:) does its own thing.
+            if item.entry.type == .text {
+                let decoded = await Task.detached(priority: .userInitiated) {
+                    String(decoding: bytes, as: UTF8.self)
+                }.value
+                decodedText = decoded
+            }
             payload = .loaded(bytes)
         } catch let e as SyncError {
             payload = .failed(e)
@@ -482,6 +515,37 @@ struct ClipboardPreviewSheet: View {
         case .notFound:                  return String(localized: "服务器尚未发布剪贴板")
         case .hashMismatch:              return String(localized: "内容校验失败 — 文件可能损坏")
         }
+    }
+}
+
+/// Selectable, non-editable text backed by `UITextView`. SwiftUI's
+/// native `Text` with `.textSelection(.enabled)` becomes janky past a
+/// few tens of thousands of characters; UITextView with TextKit handles
+/// hundreds of thousands smoothly. `isScrollEnabled = false` so it
+/// participates in the outer `ScrollView` instead of nesting its own
+/// scroll region.
+private struct SelectableTextView: UIViewRepresentable {
+    let text: String
+    let dimmed: Bool
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView(usingTextLayoutManager: true)
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isScrollEnabled = false
+        tv.backgroundColor = .clear
+        tv.textContainer.lineFragmentPadding = 0
+        tv.textContainerInset = .zero
+        tv.adjustsFontForContentSizeCategory = true
+        tv.font = UIFont.preferredFont(forTextStyle: .body)
+        tv.dataDetectorTypes = []
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return tv
+    }
+
+    func updateUIView(_ tv: UITextView, context: Context) {
+        if tv.text != text { tv.text = text }
+        tv.textColor = dimmed ? .secondaryLabel : .label
     }
 }
 
