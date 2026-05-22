@@ -24,6 +24,10 @@ struct ShareRootView: View {
     @State private var trustInsecureCert: Bool = false
     @State private var selectedServerId: String?
     @State private var prefillNote: String? = nil
+    /// Mirrors the user's appearance setting from the App Group so the
+    /// share sheet matches the main app instead of always rendering in
+    /// whatever the system happens to be set to.
+    @State private var appearance: AppearanceMode = .system
 
     enum Phase: Equatable {
         case loadingAttachment
@@ -90,6 +94,7 @@ struct ShareRootView: View {
             }
         }
         .task { await loadEverything() }
+        .preferredColorScheme(appearance.colorScheme)
     }
 
     // MARK: - Subviews
@@ -267,9 +272,10 @@ struct ShareRootView: View {
     private func loadEverything() async {
         let store = SettingsStore()
         let loadedServers = store.loadServers()
-        let trust = store.loadAppSettings().trustInsecureCert
+        let loadedSettings = store.loadAppSettings()
         servers = loadedServers
-        trustInsecureCert = trust
+        trustInsecureCert = loadedSettings.trustInsecureCert
+        appearance = loadedSettings.appearance
 
         // Resolve initial selection: Sharing-Suggestions tap takes
         // priority; if the tapped server has since been deleted we note

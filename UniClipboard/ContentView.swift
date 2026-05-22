@@ -36,12 +36,10 @@ struct ContentView: View {
                 mainTabs
             }
         }
-        // Lock the whole app to the dark color scheme so the system
-        // grouped backgrounds line up with the app icon's near-black
-        // tone (#15171C) — the brand identity is "ghost on dark", not
-        // a generic indigo accent. Share-extension UI runs in its own
-        // process and is locked independently in ShareRootView.
-        .preferredColorScheme(.dark)
+        // Apply the user's appearance preference. `.system` resolves to
+        // nil so SwiftUI releases the override and follows iOS. The
+        // share-extension process reads the same setting in ShareRootView.
+        .preferredColorScheme(vm.appSettings.appearance.colorScheme)
         // `.onOpenURL` fires on the root regardless of which branch is on
         // screen, including while a sheet/modal is up. The dispatcher in
         // AppViewModel stages the parsed payload (or error) into

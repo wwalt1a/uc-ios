@@ -79,6 +79,19 @@ struct SettingsView: View {
 
             StorageSettingsSection(appSettings: $vm.appSettings)
 
+            Section {
+                Picker(selection: $vm.appSettings.appearance) {
+                    ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                        Text(mode.localizedLabel).tag(mode)
+                    }
+                } label: {
+                    Label("主题", systemImage: "circle.lefthalf.filled")
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("外观")
+            }
+
             Section("诊断") {
                 NavigationLink {
                     LogsPlaceholderView()

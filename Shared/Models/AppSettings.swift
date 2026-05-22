@@ -1,5 +1,15 @@
 import Foundation
 
+/// User-selectable UI appearance. `system` defers to iOS; `light`/`dark`
+/// force a specific scheme regardless of system setting. Raw String so the
+/// persisted JSON stays human-readable and forward-compatible — unknown
+/// values fall back to `.system` on decode.
+public enum AppearanceMode: String, Codable, CaseIterable, Sendable {
+    case system
+    case light
+    case dark
+}
+
 /// User-tunable application settings persisted under the `app_settings` key.
 /// Spec: docs/SYNC_PROTOCOL.md §5.4. All keys are forward-compatible:
 /// missing keys are filled with defaults; unknown keys are tolerated.
@@ -26,6 +36,9 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
     /// Disk cap for the on-device payload cache, in bytes. Shrinking this
     /// at runtime evicts immediately via `PayloadCache.setMaxBytes(_:)`.
     public var payloadCacheMaxBytes: Int
+    /// UI appearance preference. Default `.system` so existing installs
+    /// keep their current behavior (follow iOS appearance).
+    public var appearance: AppearanceMode
 
     public static let defaults = AppSettings(
         trustInsecureCert: false,
@@ -37,7 +50,8 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         autoApplyServerChanges: true,
         prefetchAttachments: true,
         prefetchOnCellular: false,
-        payloadCacheMaxBytes: 200 * 1024 * 1024
+        payloadCacheMaxBytes: 200 * 1024 * 1024,
+        appearance: .system
     )
 
     public init(
@@ -50,7 +64,8 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         autoApplyServerChanges: Bool = true,
         prefetchAttachments: Bool = true,
         prefetchOnCellular: Bool = false,
-        payloadCacheMaxBytes: Int = 200 * 1024 * 1024
+        payloadCacheMaxBytes: Int = 200 * 1024 * 1024,
+        appearance: AppearanceMode = .system
     ) {
         self.trustInsecureCert = trustInsecureCert
         self.autoCheckUpdate = autoCheckUpdate
@@ -62,6 +77,7 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         self.prefetchAttachments = prefetchAttachments
         self.prefetchOnCellular = prefetchOnCellular
         self.payloadCacheMaxBytes = payloadCacheMaxBytes
+        self.appearance = appearance
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -69,6 +85,7 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         case downloadRelativePath, logViewLevelFilter, ignoredVersion
         case autoApplyServerChanges
         case prefetchAttachments, prefetchOnCellular, payloadCacheMaxBytes
+        case appearance
     }
 
     public init(from decoder: any Decoder) throws {
@@ -84,6 +101,14 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         prefetchAttachments     = try c.decodeIfPresent(Bool.self,   forKey: .prefetchAttachments)     ?? d.prefetchAttachments
         prefetchOnCellular      = try c.decodeIfPresent(Bool.self,   forKey: .prefetchOnCellular)      ?? d.prefetchOnCellular
         payloadCacheMaxBytes    = try c.decodeIfPresent(Int.self,    forKey: .payloadCacheMaxBytes)    ?? d.payloadCacheMaxBytes
+        // Unknown raw value (e.g. an older client wrote something we don't
+        // recognize, or the key was hand-edited) falls back to system —
+        // safer than throwing and losing every other setting in the blob.
+        if let raw = try c.decodeIfPresent(String.self, forKey: .appearance) {
+            appearance = AppearanceMode(rawValue: raw) ?? d.appearance
+        } else {
+            appearance = d.appearance
+        }
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -98,6 +123,7 @@ public struct AppSettings: Codable, Equatable, Hashable, Sendable {
         try c.encode(prefetchAttachments,     forKey: .prefetchAttachments)
         try c.encode(prefetchOnCellular,      forKey: .prefetchOnCellular)
         try c.encode(payloadCacheMaxBytes,    forKey: .payloadCacheMaxBytes)
+        try c.encode(appearance.rawValue,     forKey: .appearance)
     }
 }
 

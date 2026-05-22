@@ -265,6 +265,9 @@ final class FixturesTests: XCTestCase {
             // Cycle 12 — PayloadCache settings. Same Bool/Int defaulting
             // rule: fixture omits them and decode falls back to defaults.
             "prefetchAttachments", "prefetchOnCellular", "payloadCacheMaxBytes",
+            // UI appearance preference (light/dark/system). Always encoded
+            // as a raw String; decode falls back to .system when missing.
+            "appearance",
         ])
     }
 
