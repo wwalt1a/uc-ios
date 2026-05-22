@@ -88,16 +88,17 @@ struct ContentView: View {
 
     private var mainTabs: some View {
         TabView(selection: $selection) {
-            Tab("剪贴板", systemImage: "doc.on.clipboard.fill", value: 0) {
-                NavigationStack {
-                    HomeView(vm: vm, onGoToSettings: { selection = 1 })
-                }
+            NavigationStack {
+                HomeView(vm: vm, onGoToSettings: { selection = 1 })
             }
-            Tab("设置", systemImage: "gearshape.fill", value: 1) {
-                NavigationStack(path: $settingsPath) {
-                    SettingsView(vm: vm, path: $settingsPath)
-                }
+            .tabItem { Label("剪贴板", systemImage: "doc.on.clipboard.fill") }
+            .tag(0)
+
+            NavigationStack(path: $settingsPath) {
+                SettingsView(vm: vm, path: $settingsPath)
             }
+            .tabItem { Label("设置", systemImage: "gearshape.fill") }
+            .tag(1)
         }
         .task {
             // Unblock pasteboard reads before the engine ticks — the
