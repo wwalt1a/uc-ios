@@ -524,12 +524,23 @@ struct ClipboardPreviewSheet: View {
 /// hundreds of thousands smoothly. `isScrollEnabled = false` so it
 /// participates in the outer `ScrollView` instead of nesting its own
 /// scroll region.
+///
+/// **TextKit 1, not 2** (`usingTextLayoutManager: false`). TextKit 2's
+/// selection geometry mis-handles a long unbreakable token (e.g. an
+/// `https://…` URL) that character-wraps mid-token: the trailing grab
+/// handle won't extend the selection onto the wrapped second visual line,
+/// so users can't select the URL's tail (reported 2026-05). Plain prose,
+/// which wraps at spaces, is unaffected — which is exactly why the bug
+/// reads as "only happens with links". TextKit 2's payoff is viewport-
+/// based lazy layout, and `isScrollEnabled = false` forces full layout of
+/// the whole (capped) string regardless, so we give up nothing by using
+/// the mature TextKit 1 selection path here.
 private struct SelectableTextView: UIViewRepresentable {
     let text: String
     let dimmed: Bool
 
     func makeUIView(context: Context) -> UITextView {
-        let tv = UITextView(usingTextLayoutManager: true)
+        let tv = UITextView(usingTextLayoutManager: false)
         tv.isEditable = false
         tv.isSelectable = true
         tv.isScrollEnabled = false
@@ -539,13 +550,29 @@ private struct SelectableTextView: UIViewRepresentable {
         tv.adjustsFontForContentSizeCategory = true
         tv.font = UIFont.preferredFont(forTextStyle: .body)
         tv.dataDetectorTypes = []
+        // TextKit 1's UITextView reports no usable multi-line
+        // intrinsicContentSize inside a SwiftUI representable, so the block
+        // collapses to a single visible line (TextKit 2 happened to self-
+        // expand — but its selection geometry is what we're fixing). Let
+        // SwiftUI own the width and resist vertical squeeze; `sizeThatFits`
+        // supplies the wrapped height below.
         tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tv.setContentCompressionResistancePriority(.required, for: .vertical)
         return tv
     }
 
     func updateUIView(_ tv: UITextView, context: Context) {
         if tv.text != text { tv.text = text }
         tv.textColor = dimmed ? .secondaryLabel : .label
+    }
+
+    /// Drive the representable's height from the wrapped layout at SwiftUI's
+    /// proposed width. Without this, TextKit 1's `intrinsicContentSize`
+    /// collapses the multi-line body to one visible line.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width > 0, width.isFinite else { return nil }
+        let fit = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: ceil(fit.height))
     }
 }
 
