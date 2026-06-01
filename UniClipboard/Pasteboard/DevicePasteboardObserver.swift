@@ -353,14 +353,8 @@ final class DevicePasteboardObserver {
     }
 }
 
-/// Bytes-fresh read of the device pasteboard. The clipboard metadata for
-/// UI display + the raw payload bytes for the push path. Payload is
-/// `nil` for short text (everything is in `clipboard.text` already) and
-/// non-nil for long text and images.
-struct DeviceClipboardSnapshot {
-    let clipboard: Clipboard
-    let payload: Data?
-}
+// `DeviceClipboardSnapshot` moved to `Shared/Models/DeviceClipboardSnapshot.swift`
+// so the Share + Widget extensions can reference it without this UIKit-bound file.
 
 /// Built-in image fixtures keyed by a short name. Same `red8x8` PNG the
 /// simctl stub serves so device-side `publishImage` and stub-side

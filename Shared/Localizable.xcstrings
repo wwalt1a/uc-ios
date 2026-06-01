@@ -111,6 +111,17 @@
       "extractionState" : "manual",
       "shouldTranslate" : false
     },
+    "一键接收 / 发送剪贴板" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Receive / send clipboard in one tap"
+          }
+        }
+      }
+    },
     "上次推送 %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -425,6 +436,9 @@
         }
       }
     },
+    "内容" : {
+
+    },
     "内容校验失败 — 文件可能损坏" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -467,6 +481,9 @@
           }
         }
       }
+    },
+    "分享到 UniClipboard" : {
+
     },
     "切换服务器" : {
       "extractionState" : "manual",
@@ -545,6 +562,17 @@
         }
       }
     },
+    "剪贴板为空" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clipboard is empty"
+          }
+        }
+      }
+    },
     "剪贴板为空,没有可发送的内容" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -552,6 +580,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Clipboard is empty — nothing to send"
+          }
+        }
+      }
+    },
+    "剪贴板同步" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clipboard Sync"
           }
         }
       }
@@ -622,6 +661,9 @@
         }
       }
     },
+    "发送到" : {
+
+    },
     "发送剪贴板" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -632,6 +674,9 @@
           }
         }
       }
+    },
+    "发送失败" : {
+
     },
     "取消" : {
       "extractionState" : "manual",
@@ -706,6 +751,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Image"
+          }
+        }
+      }
+    },
+    "图片 · %@ · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "图片 · %1$@ · %2$@"
           }
         }
       }
@@ -897,6 +952,9 @@
         }
       }
     },
+    "尚未配置服务器,请先打开 UniClipboard 主程序添加" : {
+
+    },
     "局域网或自签名证书时勾选" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -952,6 +1010,17 @@
         }
       }
     },
+    "已发送" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent"
+          }
+        }
+      }
+    },
     "已发送到 %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -992,6 +1061,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Latest content received to device clipboard"
+          }
+        }
+      }
+    },
+    "已接收到本机" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Received to this device"
           }
         }
       }
@@ -1359,6 +1439,9 @@
         }
       }
     },
+    "文件 · %@" : {
+
+    },
     "文件内容无法在此预览。可保存到 Documents 后用文件 App 查看。" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1380,6 +1463,9 @@
           }
         }
       }
+    },
+    "文本 · %lld 字" : {
+
     },
     "无" : {
       "extractionState" : "manual",
@@ -1468,6 +1554,9 @@
           }
         }
       }
+    },
+    "暂不支持这种内容" : {
+
     },
     "更早" : {
       "extractionState" : "manual",
@@ -1579,6 +1668,28 @@
         }
       }
     },
+    "服务器无图像数据" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No image data on server"
+          }
+        }
+      }
+    },
+    "服务器暂无内容" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing on the server"
+          }
+        }
+      }
+    },
     "服务器有新内容" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1656,6 +1767,9 @@
         }
       }
     },
+    "未选择服务器" : {
+
+    },
     "未配置" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1663,6 +1777,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Not configured"
+          }
+        }
+      }
+    },
+    "未配置服务器" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No server configured"
           }
         }
       }
@@ -1788,6 +1913,9 @@
         }
       }
     },
+    "正在发送到 %@…" : {
+
+    },
     "正在应用…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1799,6 +1927,9 @@
         }
       }
     },
+    "正在读取分享内容…" : {
+
+    },
     "正在连接…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1809,6 +1940,9 @@
           }
         }
       }
+    },
+    "没有可分享的内容" : {
+
     },
     "浅色" : {
       "extractionState" : "manual",
@@ -1894,6 +2028,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Clear cache"
+          }
+        }
+      }
+    },
+    "点按按钮即可同步" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap a button to sync"
           }
         }
       }
@@ -2187,6 +2332,28 @@
         }
       }
     },
+    "该类型无法粘贴" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can't paste this type"
+          }
+        }
+      }
+    },
+    "请先在 App 中添加服务器" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a server in the app first"
+          }
+        }
+      }
+    },
     "请先在 UniClipboard 中添加一台服务器" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2219,6 +2386,9 @@
           }
         }
       }
+    },
+    "读取分享内容失败: %@" : {
+
     },
     "跟随 WiFi 自动切换" : {
 
