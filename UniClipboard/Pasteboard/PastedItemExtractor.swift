@@ -73,9 +73,28 @@ enum PastedItemExtractor {
     }
 
     // MARK: - NSItemProvider async wrappers (nil on failure, never throw)
+    //
+    // Critical difference from `ShareItemExtractor`: the providers
+    // `PasteButton` hands us are `UIPasteboard.general.itemProviders`, and
+    // for text/URL those return a *file URL into the Pasteboard cache* from
+    // `loadItem(forTypeIdentifier:)` — not a `String`, `Data`, or web `URL`.
+    // `loadItem` alone therefore yields nil for the two most common kinds
+    // (copied text and links), so the consent push silently no-ops. The
+    // high-level `loadObject(ofClass:)` coerces every storage form (in-memory
+    // value, raw data, or cached file) into the object, so we try it first
+    // and keep `loadItem` as the fallback for share-sheet-style providers.
 
     private static func loadURL(_ p: NSItemProvider) async -> URL? {
-        await withCheckedContinuation { cont in
+        if p.canLoadObject(ofClass: NSURL.self) {
+            if let url = await withCheckedContinuation({ (cont: CheckedContinuation<URL?, Never>) in
+                _ = p.loadObject(ofClass: NSURL.self) { value, _ in
+                    cont.resume(returning: value as? URL)
+                }
+            }) {
+                return url
+            }
+        }
+        return await withCheckedContinuation { cont in
             p.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { value, _ in
                 cont.resume(returning: value as? URL)
             }
@@ -83,11 +102,23 @@ enum PastedItemExtractor {
     }
 
     private static func loadString(_ p: NSItemProvider, uti: String) async -> String? {
-        await withCheckedContinuation { cont in
+        if p.canLoadObject(ofClass: NSString.self) {
+            if let s = await withCheckedContinuation({ (cont: CheckedContinuation<String?, Never>) in
+                _ = p.loadObject(ofClass: NSString.self) { value, _ in
+                    cont.resume(returning: value as? String)
+                }
+            }) {
+                return s
+            }
+        }
+        return await withCheckedContinuation { cont in
             p.loadItem(forTypeIdentifier: uti, options: nil) { value, _ in
                 if let s = value as? String { cont.resume(returning: s); return }
-                if let url = value as? URL, !url.isFileURL {
-                    cont.resume(returning: url.absoluteString); return
+                if let url = value as? URL {
+                    if !url.isFileURL { cont.resume(returning: url.absoluteString); return }
+                    if let s = try? String(contentsOf: url, encoding: .utf8) {
+                        cont.resume(returning: s); return
+                    }
                 }
                 if let data = value as? Data, let s = String(data: data, encoding: .utf8) {
                     cont.resume(returning: s); return
