@@ -21,7 +21,7 @@ mirroring it there (or vice versa) will cause drift between docs and reality.
 | Primary category | Productivity |
 | Secondary category | Utilities |
 | Marketing version | 1.0 |
-| Build number | 1 |
+| Build number | 7 |
 | Minimum iOS | 26.2 |
 | Primary language | Simplified Chinese (zh-Hans) |
 | Additional localizations | English (en) |
