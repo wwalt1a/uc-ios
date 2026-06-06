@@ -14,7 +14,15 @@ final class AppViewModel {
     var servers: ServerConfigList {
         didSet {
             store.saveServers(servers)
-            engine?.handleServersChange(from: oldValue, to: servers)
+            // A manual pick / add / delete / edit may change which server is
+            // *effective* (§5.3 baseline + Wi-Fi overlay); reconcile drops
+            // per-server engine state when so.
+            reconcileActiveServer()
+            // Same-server credential edit (same id, new password): the
+            // effective id didn't change, so `reconcileActiveServer` won't
+            // restart a paused .authFailed loop — kick it here so the new
+            // credentials get retried on the next tick.
+            if engine?.state == .authFailed { engine?.start() }
         }
     }
 
@@ -165,77 +173,78 @@ final class AppViewModel {
         self.historyWatermark = store.loadHistoryWatermark()
         self.ssidProvider = CurrentSSIDProvider()
         self.engine = SyncEngine(viewModel: self, store: store)
-        // A Wi-Fi flip no longer changes the active server on its own — it
-        // only offers a one-tap switch nudge (see `wifiSwitchSuggestion`).
-        // On SSID change we just drop any per-network "ignore" so the new
-        // network re-evaluates. Captured weakly because the provider
-        // outlives the engine reference inside `self`.
-        self.ssidProvider.onSSIDChanged = { [weak self] _ in
-            self?.handleSSIDChanged()
+        // A network change can now flip the *effective* server on its own
+        // (§5.3 on-demand auto-switch — Wi-Fi SSID, cellular, or other). On
+        // each change we publish the SSID to the App Group (so the keyboard
+        // resolves the same server) and reconcile the engine. Captured weakly
+        // because the provider outlives the engine reference inside `self`.
+        self.ssidProvider.onNetworkChanged = { [weak self] context in
+            self?.handleNetworkChanged(context)
         }
+        // Seed bookkeeping + the cross-process SSID from the current state:
+        // the keyboard then has a network to read even before the first
+        // flip, and the first reconcile compares against the right baseline.
+        self.lastEffectiveServerId = self.activeServer?.id
+        store.saveLastKnownSSID(self.ssidProvider.currentSSID)
     }
 
-    /// The current server — the single "which server am I using" concept
-    /// (§5.2). Picking a server from the home chip or Settings, and
-    /// accepting a Wi-Fi switch nudge, all write `activeConfigId`; this is
-    /// the resolved value with the §5.2 stale-id fallback.
+    /// The server in use *right now* — the manual baseline (§5.2
+    /// `activeConfig`) with the Wi-Fi auto-switch overlay applied (§5.3
+    /// `effectiveActiveConfig`). When the current SSID matches a config's
+    /// `autoSwitchWifiNames`, that config wins automatically; otherwise the
+    /// last server the user picked from the home chip / Settings stands. The
+    /// override is a pure read — it never rewrites `activeConfigId` — so
+    /// leaving the matched network restores the manual pick on its own. Both
+    /// `servers` and `ssidProvider.currentSSID` are `@Observable`, so views
+    /// recompute when either changes.
     var activeServer: ServerConfig? {
-        servers.activeConfig
+        servers.effectiveActiveConfig(network: ssidProvider.networkContext)
     }
 
-    /// A different server whose `autoSwitchWifiNames` matches the current
-    /// Wi-Fi, surfaced as a one-tap switch nudge — unless the user already
-    /// dismissed this exact (SSID, server) pairing on this network. `nil`
-    /// means "no nudge". See `suggestedSwitch` for the matching rules.
-    var wifiSwitchSuggestion: ServerConfig? {
-        let ssid = ssidProvider.currentSSID
-        guard let candidate = servers.suggestedSwitch(currentSsid: ssid) else { return nil }
-        if let dismissed = dismissedWifiSuggestion,
-           dismissed.ssid == ServerConfig.normalizeSSID(ssid),
-           dismissed.id == candidate.id {
-            return nil
-        }
-        return candidate
-    }
-
-    /// Remembers a dismissed Wi-Fi switch suggestion so it doesn't re-nag
-    /// while the user stays on the same network. Keyed by normalized SSID +
-    /// suggested config id; cleared on every SSID change.
-    private var dismissedWifiSuggestion: (ssid: String?, id: String)?
-
-    /// Set the current server to `id`. Called by the home chip switcher,
-    /// Settings, and the Wi-Fi switch nudge — one path for all three.
-    /// Going through the view-model keeps persistence + engine-restart
-    /// centralized: `servers.didSet` fires `engine?.handleServersChange`,
-    /// which compares active IDs and resets per-server runtime state
-    /// (last-synced hash, history watermark) when the server flips.
+    /// Set the manual baseline server to `id`. Called by the home chip
+    /// switcher and Settings. Going through the view-model keeps persistence
+    /// + engine-restart centralized: `servers.didSet` fires
+    /// `reconcileActiveServer`, which resets per-server runtime state
+    /// (last-synced hash, history watermark) when the *effective* server
+    /// flips. Note a Wi-Fi auto-switch rule can still override this pick
+    /// while the matching network is connected (§5.3); the baseline takes
+    /// effect again once that network is left.
     func setActiveServer(_ id: String) {
         var list = servers
         list.activeConfigId = id
         servers = list
     }
 
-    /// Accept the pending Wi-Fi switch suggestion (makes it the current
-    /// server). No-op if there's nothing suggested right now.
-    func acceptWifiSwitch() {
-        guard let candidate = wifiSwitchSuggestion else { return }
-        setActiveServer(candidate.id)
+    /// The effective active-server id (§5.3) as of the last reconcile. Drives
+    /// the "did the server actually change?" decision in
+    /// `reconcileActiveServer`, so a `servers` mutation or SSID change that
+    /// leaves the effective server untouched doesn't needlessly reset the
+    /// engine. Pure bookkeeping — not view state.
+    @ObservationIgnored
+    private var lastEffectiveServerId: String?
+
+    /// Reconcile the engine against the current effective server (§5.3).
+    /// Called whenever something that feeds `effectiveActiveConfig` changes:
+    /// a `servers` mutation (manual pick / add / delete / edit) or an SSID
+    /// change (Wi-Fi auto-switch). When the resolved id differs from the one
+    /// we last acted on, hand off to the engine to drop per-server state and
+    /// re-tick against the new server.
+    func reconcileActiveServer() {
+        let newId = activeServer?.id
+        guard newId != lastEffectiveServerId else { return }
+        lastEffectiveServerId = newId
+        engine?.handleActiveServerChanged()
     }
 
-    /// Dismiss the pending Wi-Fi switch suggestion for this network. It
-    /// won't reappear until the SSID changes (or the same server matches a
-    /// different network).
-    func dismissWifiSwitch() {
-        guard let candidate = servers.suggestedSwitch(currentSsid: ssidProvider.currentSSID) else { return }
-        dismissedWifiSuggestion = (ServerConfig.normalizeSSID(ssidProvider.currentSSID), candidate.id)
-    }
-
-    /// Hook fired by `CurrentSSIDProvider.onSSIDChanged`. The active server
-    /// no longer follows the SSID, so there's no engine state to reset
-    /// here — we only drop the per-network "ignore" so the freshly-joined
-    /// network re-evaluates `wifiSwitchSuggestion` from scratch.
-    private func handleSSIDChanged() {
-        dismissedWifiSuggestion = nil
+    /// Hook fired by `CurrentSSIDProvider.onNetworkChanged`. Two jobs: (1)
+    /// publish the current SSID to the App Group so the keyboard extension
+    /// resolves the same on-demand server (`SettingsStore.saveLastKnownSSID`
+    /// — `context.ssid` is nil on cellular / no-Wi-Fi, which clears the file
+    /// so the keyboard never trusts a stale name), and (2) reconcile the
+    /// engine in case the network change flipped the effective server (§5.3).
+    private func handleNetworkChanged(_ context: NetworkContext) {
+        store.saveLastKnownSSID(context.ssid)
+        reconcileActiveServer()
     }
 
     /// Entry point for `.onOpenURL`. Parses the incoming URL as a

@@ -1,5 +1,28 @@
 import Foundation
 
+/// §5.3 — the single network condition under which a config auto-activates.
+/// Each config picks exactly one. Persisted as its raw string; an absent or
+/// unknown value decodes to `.none`.
+public enum AutoSwitchStrategy: String, Codable, Sendable {
+    case none       // never auto-activate (manual only)
+    case wifi       // when connected to one of `autoSwitchWifiNames`
+    case cellular   // on cellular data
+    case tailscale  // when a Tailscale virtual network is up (100.64.0.0/10)
+
+    /// SF Symbol name for this strategy — the single source of truth shared by
+    /// the editor pickers (Settings + Setup) and the server-list condition
+    /// badge, so the list and editor can't drift to different icons. It's just
+    /// a `String`, so this stays valid in the SwiftUI/UIKit-free `Shared/` layer.
+    public var iconName: String {
+        switch self {
+        case .none:      return "hand.raised"
+        case .wifi:      return "wifi"
+        case .cellular:  return "antenna.radiowaves.left.and.right"
+        case .tailscale: return "network.badge.shield.half.filled"
+        }
+    }
+}
+
 /// One server profile. Spec: docs/SYNC_PROTOCOL.md §5.1.
 public struct ServerConfig: Codable, Equatable, Hashable, Identifiable, Sendable {
     public var id: String
@@ -8,6 +31,9 @@ public struct ServerConfig: Codable, Equatable, Hashable, Identifiable, Sendable
     public var username: String
     public var password: String
     public var autoSwitchWifiNames: [String]
+    /// §5.3 — the one network condition under which this config auto-activates.
+    /// Only `.wifi` consults `autoSwitchWifiNames`.
+    public var autoSwitchStrategy: AutoSwitchStrategy
 
     public init(
         id: String,
@@ -15,7 +41,8 @@ public struct ServerConfig: Codable, Equatable, Hashable, Identifiable, Sendable
         url: String,
         username: String,
         password: String,
-        autoSwitchWifiNames: [String] = []
+        autoSwitchWifiNames: [String] = [],
+        autoSwitchStrategy: AutoSwitchStrategy = .none
     ) {
         self.id = id
         self.name = name
@@ -23,10 +50,11 @@ public struct ServerConfig: Codable, Equatable, Hashable, Identifiable, Sendable
         self.username = username
         self.password = password
         self.autoSwitchWifiNames = autoSwitchWifiNames
+        self.autoSwitchStrategy = autoSwitchStrategy
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, url, username, password, autoSwitchWifiNames
+        case id, name, url, username, password, autoSwitchWifiNames, autoSwitchStrategy
     }
 
     public init(from decoder: any Decoder) throws {
@@ -37,6 +65,20 @@ public struct ServerConfig: Codable, Equatable, Hashable, Identifiable, Sendable
         username = try c.decode(String.self, forKey: .username)
         password = try c.decode(String.self, forKey: .password)
         autoSwitchWifiNames = try c.decodeIfPresent([String].self, forKey: .autoSwitchWifiNames) ?? []
+        // Migration: pre-strategy data has no `autoSwitchStrategy`. A non-empty
+        // SSID list meant "Wi-Fi auto-switch", so map it to `.wifi`; otherwise
+        // `.none`. An unknown raw value also degrades to `.none`.
+        if c.contains(.autoSwitchStrategy) {
+            // Key present: decode it. An unknown raw value (e.g. a strategy a
+            // newer build introduced, or null) degrades to `.none` — it must
+            // NOT fall into the SSID-list migration below, or a config the user
+            // never set to Wi-Fi would silently start auto-switching on Wi-Fi.
+            autoSwitchStrategy = (try? c.decode(AutoSwitchStrategy.self, forKey: .autoSwitchStrategy)) ?? .none
+        } else {
+            // Key absent (pre-strategy data): a non-empty SSID list meant
+            // "Wi-Fi auto-switch", so map it to `.wifi`; otherwise `.none`.
+            autoSwitchStrategy = autoSwitchWifiNames.isEmpty ? .none : .wifi
+        }
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -47,6 +89,7 @@ public struct ServerConfig: Codable, Equatable, Hashable, Identifiable, Sendable
         try c.encode(username, forKey: .username)
         try c.encode(password, forKey: .password)
         try c.encode(autoSwitchWifiNames, forKey: .autoSwitchWifiNames)
+        try c.encode(autoSwitchStrategy, forKey: .autoSwitchStrategy)
     }
 
     /// §5.1 — fall back to URL when name is nil/empty/whitespace.
@@ -125,22 +168,46 @@ public struct ServerConfigList: Codable, Equatable, Hashable, Sendable {
         return configs.first
     }
 
-    /// §5.3 — the server we'd *suggest* switching to for the current Wi-Fi,
-    /// or `nil` if there's nothing worth suggesting. The active server is
-    /// always `activeConfig` (§5.2); `autoSwitchWifiNames` no longer
-    /// silently re-routes it — it only drives a one-tap UI nudge. Returns:
-    /// - `nil` when the SSID is unknown/empty (no basis to suggest).
-    /// - `nil` when the current `activeConfig` itself matches the SSID
-    ///   (already on the right server — nothing to suggest).
-    /// - otherwise the first OTHER config matching the SSID, in `configs`
-    ///   array order. Two configs sharing a SSID is a config accident; the
-    ///   deterministic "first wins" stays.
-    public func suggestedSwitch(currentSsid: String?) -> ServerConfig? {
-        guard ServerConfig.normalizeSSID(currentSsid) != nil else { return nil }
+    /// §5.3 — the server to use *right now*, applying the on-demand
+    /// auto-switch rules as an overlay over the manual baseline. `nil` only
+    /// when there's no config at all (mirrors `activeConfig`).
+    ///
+    /// Pure read — never mutates `activeConfigId`. The manual pick stays the
+    /// persisted baseline; network rules override it transiently, so leaving
+    /// a matched network restores the baseline and no two processes race to
+    /// write the active id. The main app and the keyboard extension both call
+    /// this to pick a server, so they stay in lockstep.
+    public func effectiveActiveConfig(network: NetworkContext) -> ServerConfig? {
+        resolveAutoSwitch(network: network) ?? activeConfig
+    }
+
+    /// §5.3 — the config a network rule selects for `network`, or `nil` when
+    /// no rule applies (caller falls back to `activeConfig`).
+    ///
+    /// Priority **P1 Tailscale > P2 named Wi-Fi > P3 cellular**. Tailscale is
+    /// on top because it overlays whatever the physical link is — when it's up
+    /// and a config opts into it, it wins over the Wi-Fi the device is on.
+    /// Each config picks exactly one strategy (`autoSwitchStrategy`). Within a
+    /// tier the active config wins if it qualifies (anti-flap — don't bounce
+    /// off a server that already fits), otherwise `configs` order decides
+    /// (first-wins). Tailscale up but no config opted into it falls through to
+    /// the Wi-Fi / cellular tiers. Nothing matches → nil → manual baseline.
+    func resolveAutoSwitch(network: NetworkContext) -> ServerConfig? {
         let current = activeConfig
-        if let current, current.matchesWifiName(currentSsid) { return nil }
-        for cfg in configs where cfg.id != current?.id {
-            if cfg.matchesWifiName(currentSsid) { return cfg }
+        func pick(_ matches: [ServerConfig]) -> ServerConfig? {
+            guard !matches.isEmpty else { return nil }
+            return matches.first { $0.id == current?.id } ?? matches.first
+        }
+        if network.isTailscale {
+            if let hit = pick(configs.filter { $0.autoSwitchStrategy == .tailscale }) { return hit }
+        }
+        if let ssid = ServerConfig.normalizeSSID(network.ssid) {
+            if let hit = pick(configs.filter {
+                $0.autoSwitchStrategy == .wifi && $0.matchesWifiName(ssid)
+            }) { return hit }
+        }
+        if network.isCellular {
+            if let hit = pick(configs.filter { $0.autoSwitchStrategy == .cellular }) { return hit }
         }
         return nil
     }

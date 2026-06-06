@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import ImageIO
+import Network
 import Observation
 
 /// Observable state + sync logic backing the UniClip keyboard. Owned by
@@ -149,6 +150,17 @@ final class KeyboardModel {
     /// refresh tap. Reading `changeCount` is free and never prompts.
     private var pollTask: Task<Void, Never>?
 
+    /// Live network-path facts for §5.3 auto-switch, maintained by
+    /// `pathMonitor`. `NWPathMonitor` needs no entitlement (unlike SSID), so
+    /// the keyboard reads its own interface type; only the SSID *name* comes
+    /// from the App Group.
+    private var pathIsWifi = false
+    private var pathIsCellular = false
+    private var pathIsTailscale = false
+    private var pathMonitorStarted = false
+    private let pathMonitor = NWPathMonitor()
+    private let pathQueue = DispatchQueue(label: "app.uniclipboard.keyboard.path", qos: .utility)
+
     // MARK: - Lifecycle
 
     /// Called from `viewDidAppear`. Gates on Full Access, shows cached
@@ -165,6 +177,7 @@ final class KeyboardModel {
             return
         }
         reloadCards()        // instant, offline — render before the network round-trip
+        startPathMonitoring()
         refresh()
         startMonitoring()
     }
@@ -231,6 +244,54 @@ final class KeyboardModel {
         pollTask = nil
     }
 
+    deinit { pathMonitor.cancel() }
+
+    /// Begin watching the network path (Wi-Fi / cellular / other). Needs no
+    /// entitlement — `NWPathMonitor` is free — so the keyboard reads interface
+    /// type itself; only the SSID *name* comes from the App Group. Started
+    /// once (the monitor can't restart after cancel) and torn down in
+    /// `deinit`. A change re-runs the sync so the §5.3 effective server
+    /// follows the network.
+    private func startPathMonitoring() {
+        guard !pathMonitorStarted else { return }
+        pathMonitorStarted = true
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let wifi = path.usesInterfaceType(.wifi)
+            let cellular = path.usesInterfaceType(.cellular)
+            let tailscale = TailscaleDetector.isActive()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let changed = self.pathIsWifi != wifi
+                    || self.pathIsCellular != cellular
+                    || self.pathIsTailscale != tailscale
+                self.pathIsWifi = wifi
+                self.pathIsCellular = cellular
+                self.pathIsTailscale = tailscale
+                if changed, self.hasFullAccess { self.refresh() }
+            }
+        }
+        pathMonitor.start(queue: pathQueue)
+    }
+
+    /// The current §5.3 `NetworkContext`. Interface type comes from our own
+    /// `NWPathMonitor`; the SSID name from the App Group (the main app writes
+    /// it). On cellular we deliberately drop any `last_known_ssid` — there's
+    /// no Wi-Fi, and trusting a stale name would wrongly keep a Wi-Fi rule
+    /// active. This is what lets the keyboard follow a Wi-Fi→cellular switch
+    /// even when the main app hasn't run to clear the stored SSID.
+    private func currentNetworkContext() -> NetworkContext {
+        // Tailscale (P1) checked live — getifaddrs is cheap and needs no
+        // entitlement, so the keyboard follows Tailscale on its own.
+        let tailscale = TailscaleDetector.isActive()
+        if pathIsWifi {
+            return NetworkContext(ssid: store.loadLastKnownSSID(), isCellular: false, isTailscale: tailscale)
+        }
+        if pathIsCellular {
+            return NetworkContext(ssid: nil, isCellular: true, isTailscale: tailscale)
+        }
+        return NetworkContext(ssid: nil, isCellular: false, isTailscale: tailscale)
+    }
+
     /// One poll iteration: if a sync isn't already running and the pasteboard
     /// advanced past our last sync, kick off an automatic pass. `changeCount`
     /// is free — only a genuine new copy triggers the (possibly-prompting)
@@ -287,7 +348,12 @@ final class KeyboardModel {
 
     private func sync(force: Bool, gen: Int) async {
         let servers = store.loadServers()
-        guard let server = servers.activeConfig else {
+        // Resolve the on-demand server (§5.3) from the current network: our
+        // own NWPathMonitor gives the interface type (no entitlement needed),
+        // the SSID name comes from the App Group (main app writes it) — see
+        // `currentNetworkContext`. Falls back to the manual baseline when no
+        // rule matches.
+        guard let server = servers.effectiveActiveConfig(network: currentNetworkContext()) else {
             gate = .noServer
             return
         }

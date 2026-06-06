@@ -510,29 +510,45 @@ private struct AutoSwitchStepView: View {
     var onComplete: () -> Void
 
     @State private var ssids: [String] = []
+    @State private var strategy: AutoSwitchStrategy = .none
 
     var body: some View {
         Form {
             Section {
-                Text("连接到指定 WiFi 时，提示切换到此服务器（可选）。\n稍后也可以在「设置 → 服务器列表」修改。")
+                Text("选择此配置在什么网络下自动启用（可选）。\n稍后也可以在「设置 → 服务器列表」修改。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineSpacing(2)
             }
 
-            Section("当前网络") {
-                currentNetworkRow
+            Section {
+                Picker(selection: $strategy) {
+                    Label("不自动（仅手动）", systemImage: AutoSwitchStrategy.none.iconName).tag(AutoSwitchStrategy.none)
+                    Label("指定 Wi-Fi", systemImage: AutoSwitchStrategy.wifi.iconName).tag(AutoSwitchStrategy.wifi)
+                    Label("蜂窝 / 移动数据", systemImage: AutoSwitchStrategy.cellular.iconName).tag(AutoSwitchStrategy.cellular)
+                    Label("虚拟网络 (Tailscale)", systemImage: AutoSwitchStrategy.tailscale.iconName).tag(AutoSwitchStrategy.tailscale)
+                } label: {
+                    EmptyView()
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
             }
 
-            Section("已添加的 WiFi") {
-                if ssids.isEmpty {
-                    Text("无").foregroundStyle(.secondary)
-                } else {
-                    ForEach(ssids, id: \.self) { ssid in
-                        Label(ssid, systemImage: "wifi")
-                    }
-                    .onDelete { indices in
-                        ssids.remove(atOffsets: indices)
+            if strategy == .wifi {
+                Section("当前网络") {
+                    currentNetworkRow
+                }
+
+                Section("已添加的 WiFi") {
+                    if ssids.isEmpty {
+                        Text("无").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(ssids, id: \.self) { ssid in
+                            Label(ssid, systemImage: "wifi")
+                        }
+                        .onDelete { indices in
+                            ssids.remove(atOffsets: indices)
+                        }
                     }
                 }
             }
@@ -567,7 +583,7 @@ private struct AutoSwitchStepView: View {
                 .listRowSeparator(.hidden)
             }
         }
-        .navigationTitle("WiFi 切换提示")
+        .navigationTitle("自动切换")
         .navigationBarTitleDisplayMode(.inline)
         .task {
             ssidProvider.refresh()
@@ -648,7 +664,8 @@ private struct AutoSwitchStepView: View {
             url: url,
             username: username,
             password: password,
-            autoSwitchWifiNames: ssids
+            autoSwitchWifiNames: ssids,
+            autoSwitchStrategy: strategy
         )
         servers.configs.append(server)
         servers.activeConfigId = server.id

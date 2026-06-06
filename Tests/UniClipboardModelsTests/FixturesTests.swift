@@ -188,32 +188,110 @@ final class FixturesTests: XCTestCase {
         XCTAssertEqual(cfg.displayLabel, "http://h")
     }
 
-    func test_suggestedSwitch_nilWhenCurrentItselfMatchesSSID() {
-        // Current server A matches "Home". Even though non-default B also
-        // matches, there's nothing to suggest — we're already on a server
-        // that fits this network.
-        let a = ServerConfig(id: "a", url: "http://a", username: "u", password: "p", autoSwitchWifiNames: ["Home"])
-        let b = ServerConfig(id: "b", url: "http://b", username: "u", password: "p", autoSwitchWifiNames: ["Home"])
-        let list = ServerConfigList(configs: [a, b], activeConfigId: "a")
-        XCTAssertNil(list.suggestedSwitch(currentSsid: "Home"),
-                     "no suggestion when the current server already matches")
+    // MARK: - §5.3 network auto-switch resolver
+
+    private func net(_ ssid: String? = nil, cellular: Bool = false, tailscale: Bool = false) -> NetworkContext {
+        NetworkContext(ssid: ssid, isCellular: cellular, isTailscale: tailscale)
     }
 
-    func test_suggestedSwitch_returnsNonDefaultMatchWhenCurrentDoesNotMatch() {
-        // Current A has no rule; B has "Home". On "Home" → suggest B.
+    func test_resolve_wifiStrategyMatchesSSID() {
+        // Only a `.wifi` config listing the SSID matches → it overrides baseline.
         let a = ServerConfig(id: "a", url: "http://a", username: "u", password: "p")
-        let b = ServerConfig(id: "b", url: "http://b", username: "u", password: "p", autoSwitchWifiNames: ["Home"])
+        let b = ServerConfig(id: "b", url: "http://b", username: "u", password: "p",
+                             autoSwitchWifiNames: ["Home"], autoSwitchStrategy: .wifi)
         let list = ServerConfigList(configs: [a, b], activeConfigId: "a")
-        XCTAssertEqual(list.suggestedSwitch(currentSsid: "Home")?.id, "b")
+        XCTAssertEqual(list.effectiveActiveConfig(network: net("Home"))?.id, "b")
     }
 
-    func test_suggestedSwitch_nilWhenSsidUnknownOrNoMatch() {
+    func test_resolve_wifiNamesInertUnlessStrategyIsWifi() {
+        // A config carries SSIDs but its strategy isn't .wifi → it does NOT
+        // auto-switch (single-strategy model; SSIDs only count under .wifi).
         let a = ServerConfig(id: "a", url: "http://a", username: "u", password: "p")
-        let b = ServerConfig(id: "b", url: "http://b", username: "u", password: "p", autoSwitchWifiNames: ["Home"])
+        let b = ServerConfig(id: "b", url: "http://b", username: "u", password: "p",
+                             autoSwitchWifiNames: ["Home"], autoSwitchStrategy: .none)
         let list = ServerConfigList(configs: [a, b], activeConfigId: "a")
-        XCTAssertNil(list.suggestedSwitch(currentSsid: nil), "no SSID → no basis to suggest")
-        XCTAssertNil(list.suggestedSwitch(currentSsid: "<unknown ssid>"))
-        XCTAssertNil(list.suggestedSwitch(currentSsid: "Cafe"), "no rule matches → no suggestion")
+        XCTAssertEqual(list.effectiveActiveConfig(network: net("Home"))?.id, "a")
+    }
+
+    func test_resolve_wifiKeepsActiveWhenItQualifies() {
+        let a = ServerConfig(id: "a", url: "http://a", username: "u", password: "p",
+                             autoSwitchWifiNames: ["Home"], autoSwitchStrategy: .wifi)
+        let b = ServerConfig(id: "b", url: "http://b", username: "u", password: "p",
+                             autoSwitchWifiNames: ["Home"], autoSwitchStrategy: .wifi)
+        let list = ServerConfigList(configs: [a, b], activeConfigId: "a")
+        XCTAssertEqual(list.effectiveActiveConfig(network: net("Home"))?.id, "a",
+                       "anti-flap: active config that fits stays")
+    }
+
+    func test_resolve_cellularStrategy() {
+        let a = ServerConfig(id: "a", url: "http://a", username: "u", password: "p")
+        let b = ServerConfig(id: "b", url: "http://b", username: "u", password: "p",
+                             autoSwitchStrategy: .cellular)
+        let list = ServerConfigList(configs: [a, b], activeConfigId: "a")
+        XCTAssertEqual(list.effectiveActiveConfig(network: net(cellular: true))?.id, "b")
+    }
+
+    func test_resolve_tailscaleBeatsWifi() {
+        // Tailscale is P1: up + a config opts in → it wins over the Wi-Fi the
+        // device is physically on.
+        let wifi = ServerConfig(id: "w", url: "http://w", username: "u", password: "p",
+                                autoSwitchWifiNames: ["Home"], autoSwitchStrategy: .wifi)
+        let ts = ServerConfig(id: "t", url: "http://t", username: "u", password: "p",
+                              autoSwitchStrategy: .tailscale)
+        let list = ServerConfigList(configs: [wifi, ts], activeConfigId: "w")
+        XCTAssertEqual(list.effectiveActiveConfig(network: net("Home", tailscale: true))?.id, "t")
+    }
+
+    func test_resolve_tailscaleUpButNoConfigFallsThroughToWifi() {
+        // Tailscale up but nobody opted into it → fall through to the Wi-Fi tier.
+        let wifi = ServerConfig(id: "w", url: "http://w", username: "u", password: "p",
+                                autoSwitchWifiNames: ["Home"], autoSwitchStrategy: .wifi)
+        let cell = ServerConfig(id: "c", url: "http://c", username: "u", password: "p",
+                                autoSwitchStrategy: .cellular)
+        let list = ServerConfigList(configs: [wifi, cell], activeConfigId: "c")
+        XCTAssertEqual(list.effectiveActiveConfig(network: net("Home", tailscale: true))?.id, "w")
+    }
+
+    func test_resolve_fallsBackToBaseline() {
+        // No tier matches → manual baseline (§5.2); empty list → nil.
+        let a = ServerConfig(id: "a", url: "http://a", username: "u", password: "p")
+        let b = ServerConfig(id: "b", url: "http://b", username: "u", password: "p",
+                             autoSwitchWifiNames: ["Home"], autoSwitchStrategy: .wifi)
+        let list = ServerConfigList(configs: [a, b], activeConfigId: "a")
+        XCTAssertEqual(list.effectiveActiveConfig(network: net("Cafe"))?.id, "a",
+                       "unconfigured Wi-Fi → baseline (no catch-all tier)")
+        XCTAssertEqual(list.effectiveActiveConfig(network: net())?.id, "a", "offline → baseline")
+        XCTAssertNil(ServerConfigList().effectiveActiveConfig(network: net("Home")),
+                     "empty list → nil, mirroring activeConfig")
+    }
+
+    func test_serverConfig_codable_roundTripsStrategy() throws {
+        let cfg = ServerConfig(id: "a", url: "http://a", username: "u", password: "p",
+                               autoSwitchWifiNames: ["Home"], autoSwitchStrategy: .tailscale)
+        let back = try JSONDecoder().decode(ServerConfig.self, from: JSONEncoder().encode(cfg))
+        XCTAssertEqual(back, cfg)
+        XCTAssertEqual(back.autoSwitchStrategy, .tailscale)
+    }
+
+    func test_serverConfig_migratesLegacyWifiNamesToStrategy() throws {
+        // Pre-strategy JSON: a non-empty SSID list → .wifi; empty/absent → .none.
+        let withSSIDs = #"{"id":"a","url":"http://a","username":"u","password":"p","autoSwitchWifiNames":["Home"]}"#
+        XCTAssertEqual(try JSONDecoder().decode(ServerConfig.self, from: Data(withSSIDs.utf8)).autoSwitchStrategy, .wifi)
+        let noSSIDs = #"{"id":"b","url":"http://b","username":"u","password":"p"}"#
+        XCTAssertEqual(try JSONDecoder().decode(ServerConfig.self, from: Data(noSSIDs.utf8)).autoSwitchStrategy, AutoSwitchStrategy.none)
+    }
+
+    func test_serverConfig_unknownStrategyDegradesToNone_notWifi() throws {
+        // §5.1: an *unknown* strategy raw value degrades to .none. The SSID-list
+        // → .wifi migration must apply ONLY when the key is absent (pre-strategy
+        // data) — a present-but-unknown value (a newer build's strategy, or
+        // null) must NOT inherit .wifi just because an SSID list is also present.
+        let unknownWithSSIDs = #"{"id":"a","url":"http://a","username":"u","password":"p","autoSwitchWifiNames":["Home"],"autoSwitchStrategy":"vpn"}"#
+        XCTAssertEqual(try JSONDecoder().decode(ServerConfig.self, from: Data(unknownWithSSIDs.utf8)).autoSwitchStrategy,
+                       AutoSwitchStrategy.none)
+        let nullStrategy = #"{"id":"b","url":"http://b","username":"u","password":"p","autoSwitchStrategy":null}"#
+        XCTAssertEqual(try JSONDecoder().decode(ServerConfig.self, from: Data(nullStrategy.utf8)).autoSwitchStrategy,
+                       AutoSwitchStrategy.none)
     }
 
     func test_legacyManualOverride_promotedToActiveConfigOnDecode() throws {
@@ -246,19 +324,23 @@ final class FixturesTests: XCTestCase {
         XCTAssertNil(ServerConfig.normalizeSSID("0x"))
     }
 
-    func test_suggestedSwitch_fromFixturePrefersNonDefaultMatch() throws {
+    func test_effectiveActiveConfig_fromFixturePrefersWifiOverCellular() throws {
         let data = try loadFixture("server_config_list")
         let list = try JSONDecoder().decode(ServerConfigList.self, from: data)
-        // Active is config #3 (no SSIDs). Connected to "Home-5G" → suggest config #1.
-        let suggestion = list.suggestedSwitch(currentSsid: "Home-5G")
-        XCTAssertEqual(suggestion?.id, "0c1f2e3a-4b5c-6d7e-8f90-123456789abc")
+        // Active is config #3 (remote, strategy = cellular). On "Home-5G",
+        // config #1's Wi-Fi rule (P2) wins → config #1.
+        XCTAssertEqual(list.effectiveActiveConfig(network: net("Home-5G"))?.id,
+                       "0c1f2e3a-4b5c-6d7e-8f90-123456789abc")
     }
 
-    func test_suggestedSwitch_fromFixtureNilWhenSsidUnknown() throws {
+    func test_effectiveActiveConfig_fromFixtureCellularAndOffline() throws {
         let data = try loadFixture("server_config_list")
         let list = try JSONDecoder().decode(ServerConfigList.self, from: data)
-        XCTAssertNil(list.suggestedSwitch(currentSsid: nil))
-        XCTAssertNil(list.suggestedSwitch(currentSsid: "<unknown ssid>"))
+        let remoteId = "ff112233-4455-6677-8899-aabbccddeeff"
+        // Config #3's strategy is cellular → on cellular it's the effective server.
+        XCTAssertEqual(list.effectiveActiveConfig(network: net(cellular: true))?.id, remoteId)
+        // Offline → no rule applies → the baseline (§5.2 active = #3) stands.
+        XCTAssertEqual(list.effectiveActiveConfig(network: net())?.id, remoteId)
     }
 
     func test_legacyServerConfig_migrationProducesActiveSingleConfig() throws {

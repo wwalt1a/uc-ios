@@ -159,9 +159,9 @@ struct ContentView: View {
                 // starts mutating (and persisting) the in-memory log.
                 vm.reconcileSharedHistory()
                 // Refresh SSID on foreground so a Wi-Fi flip that happened
-                // while backgrounded re-evaluates `wifiSwitchSuggestion`
-                // right away instead of waiting for the next NWPathMonitor
-                // callback.
+                // while backgrounded re-evaluates the §5.3 effective server
+                // (`effectiveActiveConfig`) right away instead of waiting for
+                // the next NWPathMonitor callback.
                 vm.ssidProvider.refresh()
                 vm.engine.isSceneInactive = false
                 vm.engine.start()

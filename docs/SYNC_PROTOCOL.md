@@ -606,19 +606,28 @@ following the same JSON shape so users can migrate between platforms.
 
 ```jsonc
 {
-  "id":                   "uuid-v4-string",   // required
-  "name":                 "string | null",    // optional, user-chosen label
-  "url":                  "https://...",      // required, raw (not normalized)
-  "username":             "string",           // required
-  "password":             "string",           // required
-  "autoSwitchWifiNames":  ["SSID-1", "SSID-2"]  // default: []
+  "id":                  "uuid-v4-string",                  // required
+  "name":                "string | null",                   // optional, user-chosen label
+  "url":                 "https://...",                     // required, raw (not normalized)
+  "username":            "string",                          // required
+  "password":            "string",                          // required
+  "autoSwitchWifiNames": ["SSID-1", "SSID-2"],              // default: []  (only used when strategy = "wifi")
+  "autoSwitchStrategy":  "none|wifi|cellular|tailscale"     // default: "none"
 }
 ```
 
 - `id`: stable UUID v4. Two configs with the same `id` are the same config.
 - `name`: human-readable label. If null/empty, the UI falls back to `url`.
-- `autoSwitchWifiNames`: when the device is connected to one of these SSIDs,
-  the client SHOULD activate this config automatically (§5.3).
+- `autoSwitchStrategy`: the **single** network condition under which this config
+  auto-activates (§5.3) — one of `none` (manual only), `wifi`, `cellular`,
+  `tailscale`.
+- `autoSwitchWifiNames`: the SSIDs for the `wifi` strategy; inert under any
+  other strategy.
+
+`autoSwitchStrategy` default-decodes to `none`. **Migration**: data written
+before this field existed has no `autoSwitchStrategy`, so a non-empty
+`autoSwitchWifiNames` maps to `wifi`, otherwise `none`. An unknown raw value
+also degrades to `none`.
 
 #### SSID normalization rule
 
@@ -655,29 +664,72 @@ promote a resolvable `manualOverrideConfigId` into `activeConfigId` (the user's
 last explicit pick becomes the current server) and MUST NOT re-encode the key.
 An absent or unresolvable value is ignored.
 
-### 5.3 SSID-based switch suggestion
+### 5.3 Network-based auto-switch (effective active config)
 
-The active server is **always** `activeConfig` (§5.2). `autoSwitchWifiNames`
-does NOT silently re-route it — it only drives a one-tap, client-side *switch
-suggestion*. When the suggestion is accepted, the client sets `activeConfigId`
-to the suggested config (flowing through the normal §5.2 path); when ignored,
-nothing changes. A client without UI for the suggestion simply stays on
-`activeConfig`.
+The **effective** active server is resolved on every network change as an
+on-demand overlay over the manual baseline (`activeConfig`, §5.2). This is a
+*pure read* — it never rewrites `activeConfigId`. The manual pick stays the
+persisted baseline; network rules override it transiently, so leaving a matched
+network restores the baseline automatically and no two processes race to write
+the active id. The main app and the keyboard extension both resolve through the
+same function, so they agree on which server is in use.
+
+The device's current network is captured as a `NetworkContext`:
 
 ```
-def suggestedSwitch(list, currentSsid):           # the server to *suggest*, or None
-    if currentSsid is None: return None           # WiFi unknown / off / no perm
-    current = getActiveConfig(list)               # §5.2 (activeConfigId + fallback)
-    if current and current.matchesWifiName(currentSsid):
-        return None                               # already on a server that fits
-    for cfg in list.configs:                      # first OTHER config matching the SSID
-        if cfg.id == current.id: continue
-        if cfg.matchesWifiName(currentSsid): return cfg
+NetworkContext = {
+  ssid:        string | null   # normalized §5.1 SSID; null when not on a named Wi-Fi
+  isCellular:  bool            # primary path is cellular data
+  isTailscale: bool            # a Tailscale virtual network is up (see below)
+}
+```
+
+`isCellular` / interface type come from the OS network path, and `isTailscale`
+from enumerating local interfaces — neither needs any permission. The SSID
+*name* needs the Wi-Fi-info entitlement + Location, so a client that can't read
+it (e.g. the keyboard extension) supplies `ssid = null` and relies on the other
+dimensions.
+
+**Tailscale detection.** `isTailscale` is true iff a local interface holds an
+IPv4 address in Tailscale's CGNAT range **100.64.0.0/10** (via `getifaddrs`).
+This pins it to Tailscale rather than "some VPN", and works from any process.
+
+```
+def effectiveActiveConfig(list, network):
+    return resolveAutoSwitch(list, network) or getActiveConfig(list)   # §5.2 fallback
+
+def resolveAutoSwitch(list, network):                 # rule-selected config, or None
+    current = getActiveConfig(list)
+    def pick(matches):                                # anti-flap: keep active if it qualifies
+        if not matches: return None
+        return first(m for m in matches if m.id == current.id) or matches[0]
+    if network.isTailscale:                           # P1 — Tailscale (overlays the link)
+        hit = pick([c for c in list.configs if c.autoSwitchStrategy == "tailscale"])
+        if hit: return hit
+    if network.ssid is not None:                      # P2 — a wifi-strategy config listing the SSID
+        hit = pick([c for c in list.configs
+                    if c.autoSwitchStrategy == "wifi" and c.matchesWifiName(network.ssid)])
+        if hit: return hit
+    if network.isCellular:                            # P3 — a cellular-strategy config
+        hit = pick([c for c in list.configs if c.autoSwitchStrategy == "cellular"])
+        if hit: return hit
     return None
 ```
 
+Priority is **P1 Tailscale > P2 named Wi-Fi > P3 cellular > manual baseline**.
+Each config picks exactly one strategy. Tailscale is on top because it overlays
+whatever the physical link is — when it's up and a config opts in, it wins over
+the Wi-Fi the device is physically on; if no config opted into Tailscale,
+resolution falls through to the Wi-Fi / cellular tiers. Within a tier the active
+config wins if it qualifies (anti-flap); otherwise `configs` order decides
+(first-wins). Nothing matches → manual baseline.
+
 `cfg.matchesWifiName(ssid)` returns `true` iff the normalized `ssid` is
 contained in the normalized `cfg.autoSwitchWifiNames`.
+
+A client MAY surface the effective server differently from the baseline (e.g. an
+"auto" badge) so the user understands why the active server changed without a
+manual pick.
 
 ### 5.4 `AppSettings`
 

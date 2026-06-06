@@ -59,6 +59,18 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
     /// read-through fallback covers any miss.
     private(set) var isCellular: Bool = false
 
+    /// Whether a Tailscale virtual network is up (a local interface holds an
+    /// IPv4 in 100.64.0.0/10 — see `TailscaleDetector`). Highest-priority §5.3
+    /// tier. Re-checked off the same NWPathMonitor callback as `isCellular`,
+    /// since the VPN coming up / going down changes the path.
+    private(set) var isTailscale: Bool = false
+
+    /// Current network as a §5.3 `NetworkContext`, fed to
+    /// `ServerConfigList.effectiveActiveConfig(network:)`.
+    var networkContext: NetworkContext {
+        NetworkContext(ssid: currentSSID, isCellular: isCellular, isTailscale: isTailscale)
+    }
+
     @ObservationIgnored
     private let manager: CLLocationManager
 
@@ -71,12 +83,17 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
     @ObservationIgnored
     private let pathQueue = DispatchQueue(label: "app.uniclipboard.ssid-path", qos: .utility)
 
-    /// Fires after `currentSSID` actually changes (not on every refresh).
-    /// AppViewModel hooks this to drive engine state resets when a Wi-Fi
-    /// flip changes the effective active server. Not part of the
-    /// observable surface — purely an out-of-band hook.
+    /// Fires when the network context actually changes — SSID, cellular, or
+    /// reachability — not on every refresh. AppViewModel hooks this to
+    /// publish the SSID cross-process and reset engine state when a network
+    /// change flips the §5.3 effective server. Not part of the observable
+    /// surface — purely an out-of-band hook.
     @ObservationIgnored
-    var onSSIDChanged: ((_ newSSID: String?) -> Void)?
+    var onNetworkChanged: ((_ context: NetworkContext) -> Void)?
+
+    /// Last context handed to `onNetworkChanged`, for change-deduplication.
+    @ObservationIgnored
+    private var lastPublishedContext: NetworkContext?
 
     override init() {
         self.manager = CLLocationManager()
@@ -97,10 +114,26 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
         // notify on. The handler hops to MainActor before calling
         // `refresh()` to keep the @MainActor invariant.
         self.pathMonitor.pathUpdateHandler = { [weak self] path in
+            let onWifi = path.usesInterfaceType(.wifi)
             let cellular = path.usesInterfaceType(.cellular)
+            let tailscale = TailscaleDetector.isActive()
             Task { @MainActor [weak self] in
-                self?.isCellular = cellular
-                self?.refresh()
+                guard let self else { return }
+                self.isCellular = cellular
+                self.isTailscale = tailscale
+                // If the path no longer uses Wi-Fi, the last-read SSID is stale.
+                // Clear it synchronously *before* the publish below: otherwise a
+                // Wi-Fi→cellular flip would publish (ssid: "Home", isCellular:
+                // true), and the §5.3 resolver — which ranks Wi-Fi above
+                // cellular — would pick the now-unreachable LAN server for the
+                // tick until the async `refresh()` nils the SSID. `refresh()`
+                // re-reads the real SSID when Wi-Fi is (still) up.
+                if !onWifi, self.currentSSID != nil { self.currentSSID = nil }
+                // Publish the cellular/Tailscale flip right away, then refresh
+                // the SSID (async) which publishes again if the name changed.
+                // `publishIfChanged` dedups, so this isn't double-fired.
+                self.publishIfChanged()
+                self.refresh()
             }
         }
         self.pathMonitor.start(queue: pathQueue)
@@ -119,33 +152,37 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
 
     /// Re-read the current SSID. The read itself is async (NEHotspotNetwork.fetchCurrent
     /// is callback-based), but callers don't have to await — we kick off
-    /// a `Task` and publish via `currentSSID`. Fires `onSSIDChanged` iff
-    /// the resolved SSID actually changed.
+    /// a `Task` and publish via `currentSSID`. Fires `onNetworkChanged` iff
+    /// the resolved network context actually changed.
     func refresh() {
-        let before = currentSSID
         if let mockSSID {
             authState = .authorized
             let normalized = ServerConfig.normalizeSSID(mockSSID)
-            if normalized != before {
-                currentSSID = normalized
-                onSSIDChanged?(currentSSID)
-            }
+            if normalized != currentSSID { currentSSID = normalized }
+            publishIfChanged()
             return
         }
         if authState != .authorized {
-            if before != nil {
-                currentSSID = nil
-                onSSIDChanged?(nil)
-            }
+            if currentSSID != nil { currentSSID = nil }
+            publishIfChanged()
             return
         }
         Task { @MainActor in
             let new = await Self.readCurrentSSID()
-            if new != self.currentSSID {
-                self.currentSSID = new
-                self.onSSIDChanged?(new)
-            }
+            if new != self.currentSSID { self.currentSSID = new }
+            self.publishIfChanged()
         }
+    }
+
+    /// Emit `onNetworkChanged` iff the `NetworkContext` (`ssid`, `isCellular`,
+    /// `isTailscale`) actually changed since the last emission. Both the path
+    /// monitor and the async SSID read funnel through here, so a flip in any
+    /// one dimension fires exactly once.
+    private func publishIfChanged() {
+        let ctx = networkContext
+        guard ctx != lastPublishedContext else { return }
+        lastPublishedContext = ctx
+        onNetworkChanged?(ctx)
     }
 
     /// Read the current Wi-Fi SSID via `NEHotspotNetwork.fetchCurrent`,
@@ -212,9 +249,8 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
         if authState == .authorized {
             refresh()
         } else {
-            let before = currentSSID
-            currentSSID = nil
-            if before != nil { onSSIDChanged?(nil) }
+            if currentSSID != nil { currentSSID = nil }
+            publishIfChanged()
         }
     }
 }

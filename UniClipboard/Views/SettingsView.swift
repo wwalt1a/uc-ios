@@ -219,7 +219,7 @@ private struct ServersListView: View {
                     }
                 }
             } footer: {
-                Text("左滑可设为当前服务器或删除。WiFi 自动切换：连接到匹配 SSID 时会提示切换到该服务器。")
+                Text("左滑可设为当前服务器或删除。每个配置可设自动切换策略（指定 Wi-Fi / 蜂窝 / Tailscale）。")
                     .font(.caption)
             }
 
@@ -331,7 +331,8 @@ private struct ServersListView: View {
             url: draft.url.trimmingCharacters(in: .whitespacesAndNewlines),
             username: draft.username,
             password: draft.password,
-            autoSwitchWifiNames: draft.ssids
+            autoSwitchWifiNames: draft.ssids,
+            autoSwitchStrategy: draft.strategy
         )
         servers.configs.append(server)
         // First server in: make it active so the rest of the app has a
@@ -364,16 +365,10 @@ private struct ServerRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if !server.autoSwitchWifiNames.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wifi")
-                            .font(.caption2)
-                        Text(server.autoSwitchWifiNames.joined(separator: ", "))
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                }
+                AutoSwitchConditionBadge(
+                    strategy: server.autoSwitchStrategy,
+                    wifiNames: server.autoSwitchWifiNames
+                )
             }
             Spacer()
         }
@@ -437,7 +432,8 @@ private struct ServerEditView: View {
                 SecureField("密码", text: $server.password)
             }
 
-            SSIDEditorSection(
+            AutoSwitchSection(
+                strategy: $server.autoSwitchStrategy,
                 ssids: $server.autoSwitchWifiNames,
                 newSSID: $newSSID,
                 ssidProvider: ssidProvider
@@ -477,6 +473,7 @@ private struct ServerDraft: Identifiable, Equatable {
     var username: String
     var password: String
     var ssids: [String]
+    var strategy: AutoSwitchStrategy
 
     init(existingNames: Set<String>, payload: ServerQRPayload? = nil) {
         self.name = payload?.name
@@ -485,6 +482,7 @@ private struct ServerDraft: Identifiable, Equatable {
         self.username = payload?.username ?? ""
         self.password = payload?.password ?? ""
         self.ssids = []
+        self.strategy = .none
     }
 }
 
@@ -566,7 +564,8 @@ private struct AddServerSheet: View {
                     SecureField("密码", text: $draft.password)
                 }
 
-                SSIDEditorSection(
+                AutoSwitchSection(
+                    strategy: $draft.strategy,
                     ssids: $draft.ssids,
                     newSSID: $newSSID,
                     ssidProvider: ssidProvider
@@ -623,44 +622,69 @@ private struct AddServerSheet: View {
 
 /// Editable SSID list. Add via inline text field or one-tap from the
 /// detected current network, remove via swipe / delete.
-private struct SSIDEditorSection: View {
+private struct AutoSwitchSection: View {
+    @Binding var strategy: AutoSwitchStrategy
     @Binding var ssids: [String]
     @Binding var newSSID: String
     @Bindable var ssidProvider: CurrentSSIDProvider
 
     var body: some View {
         Section {
-            currentNetworkRow
+            Picker(selection: $strategy) {
+                Label("不自动（仅手动）", systemImage: AutoSwitchStrategy.none.iconName).tag(AutoSwitchStrategy.none)
+                Label("指定 Wi-Fi", systemImage: AutoSwitchStrategy.wifi.iconName).tag(AutoSwitchStrategy.wifi)
+                Label("蜂窝 / 移动数据", systemImage: AutoSwitchStrategy.cellular.iconName).tag(AutoSwitchStrategy.cellular)
+                Label("虚拟网络 (Tailscale)", systemImage: AutoSwitchStrategy.tailscale.iconName).tag(AutoSwitchStrategy.tailscale)
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
 
-            ForEach(ssids, id: \.self) { ssid in
-                Label(ssid, systemImage: "wifi")
-            }
-            .onDelete { indices in
-                ssids.remove(atOffsets: indices)
-            }
-            HStack {
-                Image(systemName: "wifi.circle")
-                    .foregroundStyle(.secondary)
-                TextField("手动添加 WiFi 名称", text: $newSSID)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .onSubmit(addManualSSID)
-                if !newSSID.isEmpty {
-                    Button(action: addManualSSID) {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundStyle(.tint)
+            // SSID list only matters for the Wi-Fi strategy — show it only then.
+            if strategy == .wifi {
+                currentNetworkRow
+
+                ForEach(ssids, id: \.self) { ssid in
+                    Label(ssid, systemImage: "wifi")
+                }
+                .onDelete { indices in
+                    ssids.remove(atOffsets: indices)
+                }
+                HStack {
+                    Image(systemName: "wifi.circle")
+                        .foregroundStyle(.secondary)
+                    TextField("手动添加 WiFi 名称", text: $newSSID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit(addManualSSID)
+                    if !newSSID.isEmpty {
+                        Button(action: addManualSSID) {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(.tint)
+                        }
+                        .buttonStyle(.borderless)
                     }
-                    .buttonStyle(.borderless)
                 }
             }
         } header: {
-            Text("WiFi 切换提示")
+            Text("自动切换")
         } footer: {
-            Text("连接到这里的任一 SSID 时，会提示切换到该服务器。")
-                .font(.caption)
+            Text(Self.footer(for: strategy)).font(.caption)
         }
         .task {
             ssidProvider.refresh()
+        }
+    }
+
+    /// One-line explanation of the selected strategy — what makes this config
+    /// take over, in plain language.
+    private static func footer(for strategy: AutoSwitchStrategy) -> String {
+        switch strategy {
+        case .none:      return String(localized: "此配置只在你手动选择时使用，不随网络自动切换。")
+        case .wifi:      return String(localized: "连接到下面任一 Wi-Fi 时，自动切换到此配置。")
+        case .cellular:  return String(localized: "使用蜂窝 / 移动数据时，自动切换到此配置。")
+        case .tailscale: return String(localized: "开启 Tailscale 虚拟网络时，自动切换到此配置（优先级最高，会压过 Wi-Fi）。")
         }
     }
 

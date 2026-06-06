@@ -30,6 +30,15 @@ public final class SettingsStore: @unchecked Sendable {
     /// never a half-written file.
     static let lastSyncedHashFilename = "last_synced_hash"
 
+    /// Filename of the file-backed `last_known_ssid` under `containerURL`.
+    /// Plain UTF-8, holds one normalized SSID (§5.1) or is absent for "no
+    /// Wi-Fi / unknown". File-backed (not `UserDefaults`) for the same
+    /// cross-process-freshness reason as `lastSyncedHashFilename`: the main
+    /// app writes it on every SSID change and the keyboard extension reads
+    /// it to resolve the on-demand active server, and `cfprefsd` caches the
+    /// App Group suite per-process.
+    static let lastKnownSSIDFilename = "last_known_ssid"
+
     private let defaults: UserDefaults
     private let containerURL: URL
     private let encoder: JSONEncoder
@@ -213,6 +222,41 @@ public final class SettingsStore: @unchecked Sendable {
             writeLastSyncedHashFile(hash.uppercased())
         } else {
             try? FileManager.default.removeItem(at: lastSyncedHashFileURL)
+        }
+    }
+
+    // MARK: - Last-known Wi-Fi SSID (auto-switch overlay, cross-process)
+
+    private var lastKnownSSIDFileURL: URL {
+        containerURL.appendingPathComponent(SettingsStore.lastKnownSSIDFilename, isDirectory: false)
+    }
+
+    /// The most recent normalized Wi-Fi SSID the main app observed. The app
+    /// writes it whenever the SSID changes (`AppViewModel.handleSSIDChanged`);
+    /// the keyboard extension reads it to pick the on-demand active server
+    /// (`ServerConfigList.effectiveActiveConfig`) without itself holding the
+    /// wifi-info entitlement or Location authorization. `nil` ⇒ no Wi-Fi /
+    /// unknown / never written. Re-normalized on read so a value that no
+    /// longer passes §5.1 (shouldn't happen — we normalize on write) is
+    /// treated as absent.
+    public func loadLastKnownSSID() -> String? {
+        guard let data = try? Data(contentsOf: lastKnownSSIDFileURL),
+              let raw = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return ServerConfig.normalizeSSID(raw)
+    }
+
+    /// Persist the current Wi-Fi SSID. Normalized per §5.1; pass `nil`/empty
+    /// (or anything that normalizes to `nil`, e.g. an Android privacy
+    /// placeholder) to clear it — which a reader then sees as "no network",
+    /// collapsing `effectiveActiveConfig` to the manual baseline. Atomic
+    /// write so a cross-process reader never sees a half-written name.
+    public func saveLastKnownSSID(_ ssid: String?) {
+        if let normalized = ServerConfig.normalizeSSID(ssid) {
+            try? Data(normalized.utf8).write(to: lastKnownSSIDFileURL, options: [.atomic])
+        } else {
+            try? FileManager.default.removeItem(at: lastKnownSSIDFileURL)
         }
     }
 

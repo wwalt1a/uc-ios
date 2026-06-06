@@ -6,7 +6,11 @@
       "url": "https://clip.home.lan:5033/",
       "username": "alice",
       "password": "p4ssw0rd!",
-      "autoSwitchWifiNames": ["Home-5G", "Home-2.4G"]
+      "autoSwitchWifiNames": [
+        "Home-5G",
+        "Home-2.4G"
+      ],
+      "autoSwitchStrategy": "wifi"
     },
     {
       "id": "11223344-5566-7788-99aa-bbccddeeff00",
@@ -14,14 +18,18 @@
       "url": "http://192.168.10.20:5033",
       "username": "alice",
       "password": "office-secret",
-      "autoSwitchWifiNames": ["Corp-WiFi"]
+      "autoSwitchWifiNames": [
+        "Corp-WiFi"
+      ],
+      "autoSwitchStrategy": "wifi"
     },
     {
       "id": "ff112233-4455-6677-8899-aabbccddeeff",
       "url": "https://clip.example.com",
       "username": "alice",
       "password": "remote-pass",
-      "autoSwitchWifiNames": []
+      "autoSwitchWifiNames": [],
+      "autoSwitchStrategy": "cellular"
     }
   ],
   "activeConfigId": "ff112233-4455-6677-8899-aabbccddeeff"

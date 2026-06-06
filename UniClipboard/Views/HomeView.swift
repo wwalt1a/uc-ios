@@ -60,6 +60,7 @@ struct HomeView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     ServerChip(
                         activeServer: vm.activeServer,
+                        isAutoSwitched: vm.activeServer?.id != vm.servers.activeConfig?.id,
                         allServers: vm.servers.configs,
                         onSelect: { id in vm.setActiveServer(id) }
                     )
@@ -233,11 +234,7 @@ struct HomeView: View {
                     detection: vm.appSettings.autoPushDeviceChanges ? nil : vm.pasteboardDetection,
                     onPaste: { providers in
                         Task { await vm.pushPastedProviders(providers) }
-                    },
-                    wifiSuggestion: vm.wifiSwitchSuggestion,
-                    wifiSSID: ServerConfig.normalizeSSID(vm.ssidProvider.currentSSID) ?? "",
-                    onWifiSwitch: { vm.acceptWifiSwitch() },
-                    onWifiIgnore: { vm.dismissWifiSwitch() }
+                    }
                 )
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -512,103 +509,31 @@ private struct SyncNudgeStack: View {
     /// auto-push, when the engine pushes on its own.
     let detection: PasteboardDetection?
     let onPaste: ([NSItemProvider]) -> Void
-    /// Non-nil ⇒ the current Wi-Fi matches a *different* server's
-    /// auto-switch rule. Surfaced as a one-tap switch nudge — the
-    /// demoted, never-silent replacement for the old auto-switch.
-    let wifiSuggestion: ServerConfig?
-    let wifiSSID: String
-    let onWifiSwitch: () -> Void
-    let onWifiIgnore: () -> Void
 
     var body: some View {
-        if wifiSuggestion != nil || showPending || detection != nil {
-            VStack(spacing: 8) {
-                // Server-switch suggestion gets its own card: it's a
-                // different action (change server) from the content-sync
-                // pair below it, and it carries two buttons.
-                if let wifiSuggestion {
-                    WifiSwitchRow(
-                        ssid: wifiSSID,
-                        serverName: wifiSuggestion.displayLabel,
-                        onSwitch: onWifiSwitch,
-                        onIgnore: onWifiIgnore
-                    )
-                    .background(
-                        Color.accentColor.opacity(0.12),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    )
-                    .transition(.move(edge: .top).combined(with: .opacity))
+        if showPending || detection != nil {
+            VStack(spacing: 0) {
+                if showPending {
+                    PendingRow(onApply: onApply)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                if showPending || detection != nil {
-                    VStack(spacing: 0) {
-                        if showPending {
-                            PendingRow(onApply: onApply)
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
-                        if showPending, detection != nil {
-                            Divider()
-                        }
-                        if let detection {
-                            PushRow(kind: detection.kind, onPaste: onPaste)
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
-                    }
-                    .background(
-                        Color.accentColor.opacity(0.12),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    )
+                if showPending, detection != nil {
+                    Divider()
+                }
+                if let detection {
+                    PushRow(kind: detection.kind, onPaste: onPaste)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+            .background(
+                Color.accentColor.opacity(0.12),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
             .padding(.horizontal, 16)
             .padding(.top, 8)
             .padding(.bottom, 4)
             .transition(.move(edge: .top).combined(with: .opacity))
         }
-    }
-}
-
-/// Server-switch nudge: the current Wi-Fi matches a server other than the
-/// active one. Tapping 切换 makes it the current server (§5.2); 忽略 hides
-/// the nudge until the network changes. This is the demoted form of the
-/// old silent Wi-Fi auto-switch — it never changes servers on its own.
-private struct WifiSwitchRow: View {
-    let ssid: String
-    let serverName: String
-    let onSwitch: () -> Void
-    let onIgnore: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "wifi")
-                .font(.title3)
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 8) {
-                // Localizable template: the two %@ (SSID, server name) are
-                // positional so translations can reorder them.
-                Text("当前 Wi-Fi「\(ssid)」匹配「\(serverName)」，切换?")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    Button(action: onIgnore) {
-                        Text("忽略")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    Button(action: onSwitch) {
-                        Text("切换")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color(.systemBackground))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
     }
 }
 
@@ -883,9 +808,14 @@ private struct IssueDetailSheet: View {
 // MARK: - Top toolbar server chip
 
 private struct ServerChip: View {
-    /// The current server (§5.2) — the single "which server am I on"
-    /// concept. Picking a different one here writes `activeConfigId`.
+    /// The server in use right now — the §5.3 effective server (manual
+    /// baseline + Wi-Fi overlay). Picking a different one here writes the
+    /// baseline `activeConfigId` via `onSelect`.
     let activeServer: ServerConfig?
+    /// True when `activeServer` is the result of a Wi-Fi auto-switch rule
+    /// overriding the manual baseline — drives the small "自动" badge so the
+    /// user understands why the shown server differs from their last pick.
+    let isAutoSwitched: Bool
     let allServers: [ServerConfig]
     let onSelect: (String) -> Void
 
@@ -904,6 +834,14 @@ private struct ServerChip: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+            if isAutoSwitched {
+                Text("自动")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tint)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.accentColor.opacity(0.15), in: Capsule())
+            }
             Image(systemName: "chevron.down")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -987,16 +925,10 @@ private struct ServerSwitcherRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if !server.autoSwitchWifiNames.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wifi")
-                            .font(.caption2)
-                        Text(server.autoSwitchWifiNames.joined(separator: ", "))
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                }
+                AutoSwitchConditionBadge(
+                    strategy: server.autoSwitchStrategy,
+                    wifiNames: server.autoSwitchWifiNames
+                )
             }
             Spacer()
         }

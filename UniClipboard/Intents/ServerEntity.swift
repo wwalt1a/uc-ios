@@ -5,15 +5,15 @@ import Foundation
 /// (and Siri) can show a server *picker* on the Send / Receive actions.
 ///
 /// This is the load-bearing half of "make the shortcut hit the right
-/// backend". Without it the intents silently use whatever `activeConfig`
-/// happens to be persisted — and `activeConfig` never follows the current
-/// Wi-Fi (the auto-switch rules only drive a manual nudge now, see
-/// `ServerConfigList.suggestedSwitch`). With it, the user picks the
-/// destination explicitly in the Shortcuts editor, or branches on it with
-/// the system "If Wi-Fi network is …" action, which is the reliable way to
-/// get per-network routing out of a background intent (an intent can't read
-/// the SSID itself: `NEHotspotNetwork.fetchCurrent` needs foreground +
-/// Location auth — see `CurrentSSIDProvider`).
+/// backend". Without it the intents silently use whatever the persisted
+/// baseline `activeConfig` is: a background intent can't resolve the §5.3
+/// effective server, because it can't read the SSID
+/// (`NEHotspotNetwork.fetchCurrent` needs foreground + Location auth — see
+/// `CurrentSSIDProvider`) and only the foreground app / keyboard run the
+/// network-rule resolver. With it, the user picks the destination explicitly
+/// in the Shortcuts editor, or branches on it with the system "If Wi-Fi
+/// network is …" action — the reliable way to get per-network routing out of
+/// a background intent.
 ///
 /// `id` is the `ServerConfig.id`, so a saved shortcut keeps pointing at the
 /// same server across launches and config edits.

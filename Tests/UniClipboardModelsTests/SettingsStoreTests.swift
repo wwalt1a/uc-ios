@@ -357,6 +357,46 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.loadLastSyncedHash(), "FILEWINS")
     }
 
+    // MARK: - lastKnownSSID file backend (auto-switch overlay)
+
+    func test_loadLastKnownSSID_whenEmpty_returnsNil() {
+        XCTAssertNil(makeStore().loadLastKnownSSID())
+    }
+
+    func test_lastKnownSSID_saveThenLoad_roundTrips() {
+        let store = makeStore()
+        store.saveLastKnownSSID("Home-5G")
+        XCTAssertEqual(store.loadLastKnownSSID(), "Home-5G")
+    }
+
+    func test_lastKnownSSID_normalizesOnWrite() {
+        let store = makeStore()
+        store.saveLastKnownSSID("  \"Home-5G\"  ")
+        XCTAssertEqual(store.loadLastKnownSSID(), "Home-5G", "§5.1 trim + strip quotes")
+    }
+
+    func test_lastKnownSSID_nilOrPlaceholderClearsTheFile() {
+        let store = makeStore()
+        store.saveLastKnownSSID("Home")
+        XCTAssertNotNil(store.loadLastKnownSSID())
+        store.saveLastKnownSSID(nil)
+        XCTAssertNil(store.loadLastKnownSSID())
+        // A value that normalizes to nil (Android privacy placeholder) also
+        // clears — a reader then sees "no network" and uses the baseline.
+        store.saveLastKnownSSID("Office")
+        store.saveLastKnownSSID("<unknown ssid>")
+        XCTAssertNil(store.loadLastKnownSSID())
+    }
+
+    func test_lastKnownSSID_writesAreVisibleToASecondStoreInstance() {
+        // Main-app-writes / keyboard-reads handshake — same cross-process
+        // freshness reason the synced hash uses a file backend.
+        let writer = makeStore()
+        writer.saveLastKnownSSID("Home-5G")
+        let reader = SettingsStore(defaults: defaults, containerURL: containerURL)
+        XCTAssertEqual(reader.loadLastKnownSSID(), "Home-5G")
+    }
+
     func test_loadAppSettings_unknownKeysAreTolerated() throws {
         // Older-schema reader meeting a newer-schema payload: unknown
         // keys must be silently dropped, and the present keys honored.
