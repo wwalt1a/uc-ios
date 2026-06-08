@@ -483,7 +483,7 @@ private struct ServerEditView: View {
 /// Working state for "Add server". Identifiable so `.sheet(item:)` can
 /// present it, with `id` regenerated whenever a fresh draft is created
 /// (each presentation needs a new id or SwiftUI won't re-present).
-private struct ServerDraft: Identifiable, Equatable {
+struct ServerDraft: Identifiable, Equatable {
     let id: UUID = .init()
     var name: String
     var url: String
@@ -503,7 +503,7 @@ private struct ServerDraft: Identifiable, Equatable {
     }
 }
 
-private struct AddServerSheet: View {
+struct AddServerSheet: View {
     /// Local working copy, seeded once from the presented draft. Kept as
     /// `@State` (not a Binding back to the parent's `addDraft`) so edits —
     /// including the keyboard's trailing commit on dismiss — stay inside
@@ -541,6 +541,16 @@ private struct AddServerSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button {
+                        scannerPresented = true
+                    } label: {
+                        Label("扫码连接", systemImage: "qrcode.viewfinder")
+                    }
+                } footer: {
+                    Text("扫描桌面端的二维码，一键填充以下信息。")
+                }
+
                 Section {
                     HStack(spacing: 8) {
                         TextField("便于辨识的名称", text: $draft.name)
@@ -595,14 +605,6 @@ private struct AddServerSheet: View {
                     username: draft.username,
                     password: draft.password
                 )
-
-                Section {
-                    Button {
-                        scannerPresented = true
-                    } label: {
-                        Label("从二维码填充", systemImage: "qrcode.viewfinder")
-                    }
-                }
             }
             .navigationTitle("添加服务器")
             .navigationBarTitleDisplayMode(.inline)

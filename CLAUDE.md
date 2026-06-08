@@ -203,6 +203,51 @@ If two distinct Chinese strings collide on a single English translation (e.g., t
 
 **`.buttonStyle(.borderedProminent)` needs an explicit foreground.** AccentColor's dark-mode variant is ivory (#F4F2EE), so SwiftUI's default white label disappears against the tint. Every `.borderedProminent` button in this codebase sets `.foregroundStyle(Color(.systemBackground))` on its Label — that flips with appearance and lands on a contrasting tone in both modes. Grep `borderedProminent` before merging any new button; missing this is a recurring regression. Same rule applies to anything else painted on top of `Color.accentColor` (custom capsules, banners, etc.).
 
+## Design language — Liquid Glass tokens
+
+The app targets a Paste-app-inspired visual language built on iOS 26 Liquid Glass. Every interactive surface follows a small set of reusable tokens defined in `UniClipboard/Views/LiquidGlassModifiers.swift`. The keyboard extension keeps a `private` duplicate (it compiles from a separate target that cannot link `UniClipboard/Views/`).
+
+### Shape tokens
+
+| Token | Modifier | Shape | Usage |
+|---|---|---|---|
+| Glass Circle | `.liquidGlassCircle()` | `Circle` | Icon-only buttons (search, sync, ⋯, error badge) |
+| Glass Capsule | `.liquidGlassCapsule()` | `Capsule` | Text buttons (server picker, "选择") |
+| Glass Card | `.liquidGlassCard(cornerRadius:)` | `RoundedRectangle` | Content surfaces (clipboard cards, panels) |
+
+Each modifier resolves to `glassEffect(.regular, in: shape)` on iOS 26+ and falls back to `ultraThinMaterial` + a `0.06`-opacity primary stroke on earlier versions. **Do not use raw `.ultraThinMaterial` or `Color(.tertiarySystemFill)` for interactive surfaces** — always go through the token so the glass gate stays in one place.
+
+### Standard button height: 52 pt
+
+All floating action buttons — top bar, bottom toolbar, anywhere a glass circle or capsule appears — use **52 pt** as the fixed frame height. This includes:
+
+- Bottom toolbar: search circle, server-picker capsule, sync circle
+- Top bar: "选择" capsule, "⋯" circle, error badge circle
+- Any future glass buttons in overlays or sheets
+
+When a capsule contains text, set `.frame(height: 52)` on the content *inside* the capsule (before `.liquidGlassCapsule()`), not on the outer view — this keeps the capsule hugging the 52 pt content height instead of stretching to fill a parent.
+
+### Buttons inside sheets (non-glass context)
+
+Liquid Glass looks flat on a solid sheet background because there is nothing behind it to blur. For modal sheets (`IssueDetailSheet`, server-add forms, etc.) use **filled capsules** instead:
+
+```swift
+Text("Action label")
+    .font(.subheadline.weight(.semibold))
+    .foregroundStyle(.white)          // always white — works on any tint
+    .frame(height: 48)
+    .padding(.horizontal, 32)
+    .background(tintColor, in: Capsule(style: .continuous))
+```
+
+Secondary / dismiss actions are plain text links (`.foregroundStyle(.secondary)`, no background).
+
+**Never use `Color(.systemBackground)` as foreground on a tinted capsule** — it resolves to black in dark mode, which is unreadable on orange/yellow tints. Use `.white` unconditionally.
+
+### Home page layout
+
+The home page uses a **custom top bar + custom bottom toolbar** — the system navigation bar is hidden (`.toolbar(.hidden, for: .navigationBar)`), and there is no `TabView`. Settings is accessed via the ⋯ menu → "设置" (presented as a sheet). The top and bottom bars are both `safeAreaInset` views, not system chrome.
+
 ## Mock data, briefly
 
 `Mock.swift` is a single namespace `enum Mock` with `servers`, `serverLatest`, `deviceClipboard`, and `history`. The latter is `[ClipboardHistoryItem]` (provenance-tagged Clipboards with timestamps and direction). `ClipboardHistoryItem` is a UI-only type — it's not persisted by the protocol. Replace `Mock.*` references with real state when you wire the network layer; nothing else should need to change.

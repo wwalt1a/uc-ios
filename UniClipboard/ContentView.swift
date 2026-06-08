@@ -3,9 +3,9 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var vm: AppViewModel
 
-    @State private var selection: Int = Self.initialTab
+    @State private var showingSettings = false
 
-    /// Path for the Settings tab's NavigationStack. Initial value lets a
+    /// Path for the Settings NavigationStack. Initial value lets a
     /// `UC_SETTINGS_ROUTE=servers` env hook deep-link into the Servers
     /// list (or `servers/edit/<idx>` to land on the editor) — needed
     /// because simctl can't synthesize taps for screenshot recipes.
@@ -27,13 +27,6 @@ struct ContentView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    private static var initialTab: Int {
-        guard let i = ProcessInfo.processInfo.environment["UC_INIT_TAB"].flatMap(Int.init) else {
-            return 0
-        }
-        return max(0, min(1, i))
-    }
-
     /// First-run onboarding gate. Shows the walkthrough only on a truly fresh
     /// install — no servers configured AND onboarding never completed. The
     /// `UC_ONBOARDING=1` env hook forces it on regardless so simctl recipes
@@ -46,7 +39,7 @@ struct ContentView: View {
 
     /// Raise the post-pairing enhancements carousel once, just after the
     /// first-run pairing. Deferred a beat so the SetupFlow `fullScreenCover`
-    /// finishes dismissing and `mainTabs` mounts before we present the sheet —
+    /// finishes dismissing and `mainContent` mounts before we present the sheet —
     /// stacking a present on the same runloop tick as the cover dismiss + the
     /// onboarding→tabs branch switch swallows it. Marks the persisted flag at
     /// present-time so it never pops again.
@@ -73,10 +66,10 @@ struct ContentView: View {
                 }
             } else if vm.servers.configs.isEmpty {
                 SetupFlowView(vm: vm) {
-                    // No-op: ContentView re-renders to TabView once configs is non-empty.
+                    // No-op: ContentView re-renders once configs is non-empty.
                 }
             } else {
-                mainTabs
+                mainContent
             }
         }
         // Apply the user's appearance preference. `.system` resolves to
@@ -127,19 +120,20 @@ struct ContentView: View {
         }
     }
 
-    private var mainTabs: some View {
-        TabView(selection: $selection) {
-            NavigationStack {
-                HomeView(vm: vm, onGoToSettings: { selection = 1 })
-            }
-            .tabItem { Label("剪贴板", systemImage: "doc.on.clipboard.fill") }
-            .tag(0)
-
+    private var mainContent: some View {
+        NavigationStack {
+            HomeView(vm: vm, onGoToSettings: { showingSettings = true })
+        }
+        .sheet(isPresented: $showingSettings) {
             NavigationStack(path: $settingsPath) {
                 SettingsView(vm: vm, path: $settingsPath)
             }
-            .tabItem { Label("设置", systemImage: "gearshape.fill") }
-            .tag(1)
+        }
+        // Auto-present settings when the env hook seeded a deep-link path.
+        .onAppear {
+            if !settingsPath.isEmpty {
+                showingSettings = true
+            }
         }
         // Post-pairing "解锁更多" carousel (keyboard → share → paste). Full-screen
         // (not a sheet) so the 教学页 hero bleeds to the status bar Paste-style —

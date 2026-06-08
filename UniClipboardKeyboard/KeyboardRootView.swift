@@ -760,8 +760,6 @@ private struct CardThumbnail: View {
 // MARK: - Liquid Glass helpers
 
 private extension View {
-    /// Card surface: real Liquid Glass on iOS 26+, a material+hairline fallback
-    /// below it (deployment target is iOS 17, so the glass API is gated).
     @ViewBuilder
     func liquidGlassCard() -> some View {
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)

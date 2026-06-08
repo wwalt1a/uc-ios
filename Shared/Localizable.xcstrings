@@ -140,6 +140,17 @@
         }
       }
     },
+    "Mac、Windows、Linux、iOS——复制一处，处处可用。不再被单一平台锁定。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac, Windows, Linux, iOS — copy once, use anywhere. No more platform lock-in."
+          }
+        }
+      }
+    },
     "Pulled clipboard from server (%lld min ago)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -430,6 +441,17 @@
         }
       }
     },
+    "从任意 App 分享内容到服务器，用键盘一键粘贴到任意输入框——你的剪贴板，随处可达。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share content from any app to your server, or paste with the keyboard into any text field — your clipboard, always within reach."
+          }
+        }
+      }
+    },
     "从其他 App 粘贴" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -470,6 +492,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Location permission denied"
+          }
+        }
+      }
+    },
+    "你的跨平台剪贴板" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your Cross-Platform\nClipboard"
           }
         }
       }
@@ -517,6 +550,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Save to Documents"
+          }
+        }
+      }
+    },
+    "保存图片" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save Image"
           }
         }
       }
@@ -725,6 +769,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Credentials"
+          }
+        }
+      }
+    },
+    "分享" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share"
+          }
+        }
+      }
+    },
+    "分享、键盘、随处可达" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share, Keyboard,\nAlways Within Reach"
           }
         }
       }
@@ -1247,17 +1313,6 @@
     "在分享面板中选择 UniClip" : {
 
     },
-    "你的跨平台剪贴板" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your Cross-Platform\nClipboard"
-          }
-        }
-      }
-    },
     "在系统设置中开启「位置」权限以读取当前 WiFi" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1313,13 +1368,13 @@
         }
       }
     },
-    "Mac、Windows、Linux、iOS——复制一处，处处可用。不再被单一平台锁定。" : {
+    "复制为纯文本" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mac, Windows, Linux, iOS — copy once, use anywhere. No more platform lock-in."
+            "value" : "Copy as Plain Text"
           }
         }
       }
@@ -1342,17 +1397,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Copy to device"
-          }
-        }
-      }
-    },
-    "分享、键盘、随处可达" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Share, Keyboard,\nAlways Within Reach"
           }
         }
       }
@@ -1807,6 +1851,9 @@
         }
       }
     },
+    "帮助" : {
+
+    },
     "应用" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1873,6 +1920,17 @@
         }
       }
     },
+    "开始使用" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get Started"
+          }
+        }
+      }
+    },
     "开始设置" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1891,6 +1949,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Get Started"
+          }
+        }
+      }
+    },
+    "开源自托管\n数据由你掌控" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Source & Self-Hosted\nYour Data, Your Control"
           }
         }
       }
@@ -2151,6 +2220,9 @@
         }
       }
     },
+    "扫描桌面端的二维码，一键填充以下信息。" : {
+
+    },
     "扫描桌面端的配对二维码,几秒钟完成连接" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2162,16 +2234,8 @@
         }
       }
     },
-    "开始使用" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Get Started"
-          }
-        }
-      }
+    "扫码连接" : {
+
     },
     "把「从其他 App 粘贴」设为「允许」可避免反复弹窗,让同步静默进行。" : {
       "extractionState" : "manual",
@@ -2352,6 +2416,9 @@
         }
       }
     },
+    "搜索剪贴板" : {
+
+    },
     "支持文本、链接、图片和文件。内容会直接上传到当前选中的服务器。" : {
 
     },
@@ -2410,17 +2477,6 @@
     },
     "文本 · %lld 字" : {
 
-    },
-    "从任意 App 分享内容到服务器，用键盘一键粘贴到任意输入框——你的剪贴板，随处可达。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Share content from any app to your server, or paste with the keyboard into any text field — your clipboard, always within reach."
-          }
-        }
-      }
     },
     "无" : {
       "extractionState" : "manual",
@@ -2499,6 +2555,9 @@
         }
       }
     },
+    "日期" : {
+
+    },
     "昨天" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2506,17 +2565,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Yesterday"
-          }
-        }
-      }
-    },
-    "开源自托管\n数据由你掌控" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Source & Self-Hosted\nYour Data, Your Control"
           }
         }
       }
@@ -3346,6 +3394,9 @@
         }
       }
     },
+    "筛选条件" : {
+
+    },
     "管理服务器" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3846,6 +3897,17 @@
     },
     "选中内容，点「分享」" : {
 
+    },
+    "选择" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select"
+          }
+        }
+      }
     },
     "选择 UniClip" : {
 

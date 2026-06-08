@@ -1,15 +1,11 @@
 import SwiftUI
 import UIKit
 
-/// Home tab — recent clipboard entries grouped by date.
+/// Home tab — two-column grid of clipboard history cards (Paste-app style).
 ///
-/// Earlier cycles showed a single focal card for the active clipboard.
-/// Cycle 11 expands that to a Messages-style time-descending list so the
-/// "what's on the server" view stops feeling lossy. The spec only keeps
-/// one entry on the wire (§2.1), so the list is fed by `vm.history` —
-/// today seeded from [`Mock.history`], future-wise to be appended by the
-/// `SyncEngine` on each successful pull/push and (optionally) hydrated
-/// from §2.7 `POST /api/history/query` on UniClipboard servers.
+/// Replaces the earlier List-based layout with a `LazyVGrid` that shows
+/// `ClipboardCard` cells. Supports search, multi-select, long-press preview
+/// overlay, and a bottom toolbar for search / server picker / sync.
 struct HomeView: View {
     @Bindable var vm: AppViewModel
 
@@ -17,107 +13,115 @@ struct HomeView: View {
     /// can flip the TabView selection without HomeView knowing about it.
     var onGoToSettings: () -> Void = {}
 
+    // MARK: - State
+
     @State private var showingErrorSheet: Bool =
         ProcessInfo.processInfo.environment["UC_OPEN_ISSUE_SHEET"] == "1"
+    @State private var pinnedItemId: UUID?
+    @State private var loadingItemIds: Set<UUID> = []
+    @State private var thumbnailCache: [UUID: UIImage] = [:]
+    @State private var isSearching: Bool = false
+    @State private var searchText: String = ""
+    @FocusState private var isSearchFocused: Bool
+    @State private var filterTypes: Set<Clipboard.Kind> = []
+    @State private var filterDate: SearchDateFilter = .all
+    @State private var showingFilterSheet: Bool = false
+    @State private var isSelectMode: Bool = false
+    @State private var selectedIds: Set<UUID> = []
+    @State private var showingServerPicker: Bool =
+        ProcessInfo.processInfo.environment["UC_OPEN_SWITCHER"] == "1"
 
-    /// History row selected for the preview sheet. Item-driven sheet (not
-    /// a boolean) so the sheet's content is bound to the chosen row even
-    /// if the user taps a different row before the prior sheet finishes
-    /// dismissing.
-    @State private var previewItem: ClipboardHistoryItem?
+    // MARK: - Derived
 
     private var engineState: SyncEngine.State { vm.engine.state }
+    private var isExplicitlyRefreshing: Bool { vm.engine.isExplicitlyRefreshing }
 
-    /// Show the paste-permission hint while fully-automatic push is on (the
-    /// engine reads the pasteboard each tick → iOS「允许粘贴」friction) and the
-    /// user hasn't dismissed it. Setting「从其他 App 粘贴」to「允许」silences it.
     private var showPasteHint: Bool {
         vm.appSettings.autoPushDeviceChanges && !vm.appSettings.pastePermissionHintDismissed
     }
 
-    private func openAppSettings() {
-        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-        UIApplication.shared.open(url)
-    }
-    private var isExplicitlyRefreshing: Bool { vm.engine.isExplicitlyRefreshing }
-
-    /// History rendered in the list, sorted newest-first. The mock data
-    /// already lands in roughly that order but never trust the caller —
-    /// SyncEngine will append in arrival order once wired.
+    /// History rendered in the grid, sorted newest-first. When a card is
+    /// pinned (just tapped-to-copy), that item is promoted to position 0
+    /// regardless of its timestamp so the user sees the visual feedback.
     private var sortedHistory: [ClipboardHistoryItem] {
-        vm.history.sorted { $0.timestamp > $1.timestamp }
+        var items = vm.history.sorted { $0.timestamp > $1.timestamp }
+        if let pinId = pinnedItemId,
+           let idx = items.firstIndex(where: { $0.id == pinId }), idx > 0 {
+            let pinned = items.remove(at: idx)
+            items.insert(pinned, at: 0)
+        }
+        return items
     }
 
-    private var latestId: UUID? { sortedHistory.first?.id }
-
-    /// Bucket the sorted history into 今天 / 昨天 / 7 天内 / 更早 sections.
-    /// The "past 7 days" bucket is a sliding-window count rather than the
-    /// calendar's "this week" — `Calendar.isDate(_:equalTo:toGranularity:)`
-    /// keys off `firstWeekday`, so on Sundays (firstWeekday=1, zh_CN) the
-    /// week-of-year window collapses to today only and the bucket
-    /// disappears. A 7-day window is what users actually mean.
-    private var groupedHistory: [HistorySection] {
-        HistorySection.bucket(sortedHistory)
+    private var latestId: UUID? {
+        vm.history.sorted { $0.timestamp > $1.timestamp }.first?.id
     }
+
+    private var hasActiveFilters: Bool {
+        !filterTypes.isEmpty || filterDate != .all
+    }
+
+    /// Items displayed in the grid, filtered by search text + type + date.
+    private var displayedHistory: [ClipboardHistoryItem] {
+        var items = sortedHistory
+
+        if isSearching {
+            if !searchText.isEmpty {
+                let query = searchText.lowercased()
+                items = items.filter {
+                    $0.entry.text.lowercased().contains(query)
+                    || ($0.entry.dataName?.lowercased().contains(query) ?? false)
+                }
+            }
+            if !filterTypes.isEmpty {
+                items = items.filter { filterTypes.contains($0.entry.type) }
+            }
+            items = filterDate.apply(to: items)
+        }
+
+        return items
+    }
+
+    private let twoFlexibleColumns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
+    // MARK: - Body
 
     var body: some View {
-        listOrEmpty
-            // Paste-permission hint sits above both the list and the empty
-            // state (it's a body-level inset, not a List one), so it shows the
-            // moment auto-push is on regardless of whether history exists yet.
+        gridOrEmpty
             .safeAreaInset(edge: .top, spacing: 0) {
-                if showPasteHint {
-                    PastePermissionBanner(
-                        onOpenSettings: { openAppSettings() },
-                        onDismiss: { vm.appSettings.pastePermissionHintDismissed = true }
-                    )
+                VStack(spacing: 0) {
+                    customTopBar
+                    if showPasteHint {
+                        PastePermissionBanner(
+                            onOpenSettings: { openAppSettings() },
+                            onDismiss: { vm.appSettings.pastePermissionHintDismissed = true }
+                        )
+                    }
                 }
             }
             .animation(.snappy, value: showPasteHint)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                bottomBar
+            }
             .refreshable {
                 await vm.engine.explicitRefresh()
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("剪贴板")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    ServerChip(
-                        activeServer: vm.activeServer,
-                        isAutoSwitched: vm.activeServer?.id != vm.servers.activeConfig?.id,
-                        allServers: vm.servers.configs,
-                        onSelect: { id in vm.setActiveServer(id) }
-                    )
-                }
-                if let issue = currentIssue {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showingErrorSheet = true
-                        } label: {
-                            Image(systemName: "exclamationmark.circle.fill")
-                                .foregroundStyle(issue.tint)
-                        }
-                        .accessibilityLabel(Text(issue.title))
+            .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showingServerPicker) {
+                ServerSwitcherSheet(
+                    vm: vm,
+                    onSelect: { id in
+                        vm.setActiveServer(id)
+                        showingServerPicker = false
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        vm.engine.forceTickNow()
-                    } label: {
-                        if isExplicitlyRefreshing {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(isExplicitlyRefreshing)
-                }
-            }
-            .sheet(item: $previewItem) { item in
-                ClipboardPreviewSheet(item: item, vm: vm)
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showingErrorSheet) {
                 if let issue = currentIssue {
@@ -139,8 +143,78 @@ struct HomeView: View {
             }
     }
 
+    // MARK: - Top Bar
+
+    private var customTopBar: some View {
+        HStack(spacing: 12) {
+            // Left: server status (read-only)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(.green)
+                    .frame(width: 6, height: 6)
+                Text(verbatim: vm.activeServer?.displayLabel ?? String(localized: "未配置"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            // Error badge (if any)
+            if let issue = currentIssue {
+                Button {
+                    showingErrorSheet = true
+                } label: {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(issue.tint)
+                        .frame(width: 52, height: 52)
+                }
+                .accessibilityLabel(Text(issue.title))
+            }
+
+            // "选择" / "完成" capsule
+            Button {
+                if isSelectMode {
+                    exitSelectMode()
+                } else {
+                    isSelectMode = true
+                    selectedIds = []
+                }
+            } label: {
+                Text(isSelectMode ? "完成" : "选择")
+                    .font(.subheadline.weight(.medium))
+                    .frame(height: 52)
+                    .padding(.horizontal, 20)
+                    .liquidGlassCapsule()
+            }
+
+            // "⋯" menu circle
+            Menu {
+                Button {
+                    onGoToSettings()
+                } label: {
+                    Label("设置", systemImage: "gearshape")
+                }
+                Button {
+                } label: {
+                    Label("帮助", systemImage: "questionmark.circle")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.title2)
+                    .frame(width: 52, height: 52)
+                    .liquidGlassCircle()
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Grid or Empty
+
     @ViewBuilder
-    private var listOrEmpty: some View {
+    private var gridOrEmpty: some View {
         if sortedHistory.isEmpty {
             ContentUnavailableView {
                 Label {
@@ -158,190 +232,470 @@ struct HomeView: View {
                 .accessibilityLabel(Text("推送本机剪贴板到服务器"))
             }
         } else {
-            List {
-                ForEach(groupedHistory) { section in
-                    Section {
-                        ForEach(section.items) { item in
-                            Button {
-                                previewItem = item
-                            } label: {
-                                ClipboardRow(
-                                    item: item,
-                                    isLatest: item.id == latestId
-                                )
-                                .padding(.vertical, 14)
-                                .padding(.horizontal, 14)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(
-                                    Color(.secondarySystemGroupedBackground),
-                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                )
-                                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                if item.entry.type == .text {
-                                    Button {
-                                        vm.reapplyText(item.entry.text)
-                                    } label: {
-                                        Label("复制", systemImage: "doc.on.clipboard")
-                                    }
-                                    .tint(.blue)
-                                } else if item.entry.type == .image, item.entry.hasData {
-                                    Button {
-                                        Task { await vm.applyAttachment(for: item) }
-                                    } label: {
-                                        Label("复制", systemImage: "doc.on.clipboard")
-                                    }
-                                    .tint(.blue)
-                                }
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    vm.removeHistoryItem(id: item.id)
-                                } label: {
-                                    Label("删除", systemImage: "trash")
-                                }
-                                .tint(.red)
-                                if item.entry.hasData,
-                                   item.entry.type == .image || item.entry.type == .file {
-                                    Button {
-                                        Task { await vm.saveAttachment(for: item) }
-                                    } label: {
-                                        Label("保存", systemImage: "square.and.arrow.down")
-                                    }
-                                }
-                            }
-                            .contextMenu {
-                                rowMenu(for: item)
-                            }
-                        }
-                    } header: {
-                        Text(section.title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .textCase(nil)
-                            .padding(.top, 12)
-                            .padding(.bottom, 4)
+            ScrollView(.vertical) {
+                LazyVGrid(columns: twoFlexibleColumns, spacing: 12) {
+                    ForEach(displayedHistory) { item in
+                        cardCell(for: item)
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
             }
-            .listStyle(.plain)
-            .listRowSpacing(8)
-            .environment(\.defaultMinListHeaderHeight, 0)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                // Incoming (server→device) and outgoing (device→server)
-                // nudges share one rounded container so they read as a
-                // matched pair, not two near-identical stacked cards. Either
-                // row may be absent; a hairline divides them only when both
-                // show. The outgoing row's read goes through the system
-                // `PasteButton` (no "Allow Paste" prompt); it's suppressed
-                // when the user opted into fully-automatic push — the engine
-                // pushes on its own then (see `autoPushDeviceChanges`).
-                SyncNudgeStack(
-                    showPending: engineState == .hasNewUnwritten,
-                    onApply: {
-                        Task {
-                            await vm.applyServerToDevice()
-                            // `applyError == nil` covers the text-no-data (sync
-                            // path, applyError is set to nil before return) and
-                            // text/image-with-data success cases. On a network
-                            // failure applyError is set, the row stays so the
-                            // user can retry.
-                            if vm.applyError == nil {
-                                vm.engine.markStagedApplied()
-                            }
-                        }
-                    },
-                    detection: vm.appSettings.autoPushDeviceChanges ? nil : vm.pasteboardDetection,
-                    onPaste: { providers in
-                        Task { await vm.pushPastedProviders(providers) }
-                    }
-                )
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                // `lastSavedFileURL` and `lastAppliedAttachmentName` are
-                // mutually cleared on each attempt (see AppViewModel),
-                // but if both ever co-exist save wins — it's the more
-                // expensive action so its feedback is more meaningful.
-                //
-                // Auto-dismiss after 3s: the engine's 1Hz tick bypasses
-                // `vm.refresh()` (which is the only clear path besides a
-                // new save/apply attempt), so without this the banner
-                // would stay pinned to the bottom indefinitely.
-                if let url = vm.lastSavedFileURL {
-                    SavedBanner(filePath: displayPath(for: url))
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .task(id: url) {
-                            try? await Task.sleep(for: .seconds(3))
-                            guard !Task.isCancelled else { return }
-                            if vm.lastSavedFileURL == url {
-                                vm.lastSavedFileURL = nil
-                            }
-                        }
-                } else if let name = vm.lastAppliedAttachmentName {
-                    AppliedBanner(name: name)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .task(id: name) {
-                            try? await Task.sleep(for: .seconds(3))
-                            guard !Task.isCancelled else { return }
-                            if vm.lastAppliedAttachmentName == name {
-                                vm.lastAppliedAttachmentName = nil
-                            }
-                        }
-                }
-            }
-            .animation(.snappy, value: engineState)
-            .animation(.snappy, value: vm.lastSavedFileURL)
-            .animation(.snappy, value: vm.lastAppliedAttachmentName)
-            .animation(.snappy, value: vm.pasteboardDetection)
+            .animation(.snappy, value: pinnedItemId)
         }
+    }
+
+    // MARK: - Search Bottom Bar
+
+    private var searchBottomBar: some View {
+        VStack(spacing: 8) {
+            // Filter tags row (when filters are active)
+            if hasActiveFilters {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(filterTypes), id: \.self) { kind in
+                            filterTag(label: kind.localizedLabelString) {
+                                filterTypes.remove(kind)
+                            }
+                        }
+                        if filterDate != .all {
+                            filterTag(label: filterDate.label) {
+                                filterDate = .all
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+
+            // Search input row
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                    TextField(String(localized: "搜索剪贴板"), text: $searchText)
+                        .font(.subheadline)
+                        .textFieldStyle(.plain)
+                        .focused($isSearchFocused)
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(height: 52)
+                .padding(.horizontal, 12)
+                .liquidGlassCapsule()
+
+                Button {
+                    showingFilterSheet = true
+                } label: {
+                    Image(systemName: hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        .font(.title2)
+                        .foregroundStyle(hasActiveFilters ? Color.accentColor : .primary)
+                        .frame(width: 52, height: 52)
+                        .liquidGlassCircle()
+                }
+
+                Button {
+                    withAnimation(.snappy) {
+                        isSearching = false
+                        searchText = ""
+                        filterTypes = []
+                        filterDate = .all
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.title2)
+                        .frame(width: 52, height: 52)
+                        .liquidGlassCircle()
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 8)
+        .sheet(isPresented: $showingFilterSheet) {
+            SearchFilterSheet(
+                selectedTypes: $filterTypes,
+                selectedDate: $filterDate
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func filterTag(label: String, onRemove: @escaping () -> Void) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.caption.weight(.medium))
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.accentColor.opacity(0.15), in: Capsule())
+        .foregroundStyle(Color.accentColor)
+    }
+
+    // MARK: - Card Cell
+
+    @ViewBuilder
+    private func cardCell(for item: ClipboardHistoryItem) -> some View {
+        let isSelected = isSelectMode && selectedIds.contains(item.id)
+
+        ClipboardCard(
+            item: item,
+            isLatest: item.id == latestId,
+            thumbnailImage: thumbnailCache[item.id],
+            isLoading: loadingItemIds.contains(item.id)
+        )
+        .overlay {
+            if isSelectMode {
+                ZStack {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.accentColor, lineWidth: 2)
+                    }
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 28))
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.6))
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture {
+            if isSelectMode {
+                toggleSelection(item.id)
+            } else {
+                handleTapToCopy(item)
+            }
+        }
+        .contextMenu {
+            contextMenuItems(for: item)
+        } preview: {
+            CardPreviewView(item: item, vm: vm)
+        }
+        .task {
+            await loadThumbnailIfNeeded(for: item)
+        }
+        .animation(.snappy, value: isSelectMode)
+        .animation(.snappy, value: isSelected)
+    }
+
+    // MARK: - Bottom Bar
+
+    @ViewBuilder
+    private var bottomBar: some View {
+        if isSelectMode {
+            selectModeBottomBar
+        } else if isSearching {
+            searchBottomBar
+        } else {
+            HomeBottomToolbar(
+                serverLabel: vm.activeServer?.displayLabel ?? String(localized: "未配置"),
+                isAutoSwitched: vm.activeServer?.id != vm.servers.activeConfig?.id,
+                isSyncing: isExplicitlyRefreshing,
+                onSearch: {
+                    withAnimation(.snappy) {
+                        isSearching = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        isSearchFocused = true
+                    }
+                },
+                onServerPicker: {
+                    showingServerPicker = true
+                },
+                onSync: {
+                    handleSync()
+                }
+            )
+        }
+    }
+
+    private var selectModeBottomBar: some View {
+        HStack(spacing: 24) {
+            Spacer()
+
+            Button {
+                batchCopy()
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.title2)
+                    .frame(width: 52, height: 52)
+                    .liquidGlassCircle()
+            }
+            .disabled(selectedIds.isEmpty)
+
+            Button {
+                // Pin — placeholder for future pinboard feature
+            } label: {
+                Image(systemName: "pin")
+                    .font(.title2)
+                    .frame(width: 52, height: 52)
+                    .liquidGlassCircle()
+            }
+            .disabled(selectedIds.isEmpty)
+
+            Button {
+                batchShare()
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.title2)
+                    .frame(width: 52, height: 52)
+                    .liquidGlassCircle()
+            }
+            .disabled(selectedIds.isEmpty)
+
+            Button {
+                batchDelete()
+            } label: {
+                Image(systemName: "trash")
+                    .font(.title2)
+                    .foregroundStyle(.red)
+                    .frame(width: 52, height: 52)
+                    .liquidGlassCircle()
+            }
+            .disabled(selectedIds.isEmpty)
+
+            Spacer()
+        }
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Actions
+
+    private func handleTapToCopy(_ item: ClipboardHistoryItem) {
+        switch item.entry.type {
+        case .text:
+            vm.reapplyText(item.entry.text)
+            withAnimation(.snappy) {
+                pinnedItemId = item.id
+            }
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
+            schedulePinReset()
+
+        case .image:
+            guard item.entry.hasData else { return }
+            loadingItemIds.insert(item.id)
+            Task {
+                await vm.applyAttachment(for: item)
+                loadingItemIds.remove(item.id)
+                withAnimation(.snappy) {
+                    pinnedItemId = item.id
+                }
+                let generator = UIImpactFeedbackGenerator(style: .light)
+                generator.impactOccurred()
+                schedulePinReset()
+            }
+
+        case .file, .group:
+            // Copy the filename text
+            UIPasteboard.general.string = item.entry.dataName ?? item.entry.text
+            withAnimation(.snappy) {
+                pinnedItemId = item.id
+            }
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
+            schedulePinReset()
+        }
+    }
+
+    private func handleCopyFromOverlay(_ item: ClipboardHistoryItem) {
+        switch item.entry.type {
+        case .text:
+            vm.reapplyText(item.entry.text)
+        case .image:
+            if item.entry.hasData {
+                Task { await vm.applyAttachment(for: item) }
+            }
+        case .file, .group:
+            UIPasteboard.general.string = item.entry.dataName ?? item.entry.text
+        }
+    }
+
+    private func schedulePinReset() {
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation(.snappy) {
+                pinnedItemId = nil
+            }
+        }
+    }
+
+    private func handleSync() {
+        vm.engine.forceTickNow()
     }
 
     @ViewBuilder
-    private func rowMenu(for item: ClipboardHistoryItem) -> some View {
-        if item.entry.type == .text {
-            Button {
-                vm.reapplyText(item.entry.text)
-            } label: {
-                Label("复制到本机", systemImage: "doc.on.clipboard")
-            }
+    private func contextMenuItems(for item: ClipboardHistoryItem) -> some View {
+        Button {
+            handleCopyFromOverlay(item)
+        } label: {
+            Label("复制", systemImage: "doc.on.doc")
+        }
+
+        switch item.entry.type {
+        case .text:
             Button {
                 UIPasteboard.general.string = item.entry.text
             } label: {
-                Label("仅复制文本", systemImage: "text.alignleft")
+                Label("复制为纯文本", systemImage: "doc.plaintext")
             }
-        } else if item.entry.type == .image, item.entry.hasData {
-            Button {
-                Task { await vm.applyAttachment(for: item) }
-            } label: {
-                Label("复制到本机", systemImage: "doc.on.clipboard")
-            }
-        }
-        if item.entry.hasData,
-           item.entry.type == .image || item.entry.type == .file {
+        case .image:
             Button {
                 Task { await vm.saveAttachment(for: item) }
             } label: {
-                Label("保存到 Documents", systemImage: "square.and.arrow.down")
+                Label("保存图片", systemImage: "square.and.arrow.down")
+            }
+        case .file, .group:
+            Button {
+                Task { await vm.saveAttachment(for: item) }
+            } label: {
+                Label("保存到 Documents", systemImage: "folder")
             }
         }
+
+        Button {
+            shareItem(item)
+        } label: {
+            Label("分享", systemImage: "square.and.arrow.up")
+        }
+
         Divider()
+
+        Button {
+            isSelectMode = true
+            selectedIds = [item.id]
+        } label: {
+            Label("选择", systemImage: "checkmark.circle")
+        }
+
         Button(role: .destructive) {
             vm.removeHistoryItem(id: item.id)
         } label: {
-            Label("从历史中删除", systemImage: "trash")
+            Label("删除", systemImage: "trash")
         }
     }
 
-    /// Active error worth surfacing as the toolbar's red bang. `nil` keeps
-    /// the chrome clean. Priority: save-failure (user-initiated, sticky
-    /// until next attempt) > engine state (auth fail > offline). The
-    /// `.hasNewUnwritten` state is intentionally NOT an issue — it owns
-    /// its own banner above the list.
+    private func loadThumbnailIfNeeded(for item: ClipboardHistoryItem) async {
+        guard item.entry.type == .image,
+              item.entry.hasData,
+              thumbnailCache[item.id] == nil
+        else { return }
+
+        do {
+            let bytes = try await vm.fetchPreviewBytes(for: item)
+            if let full = UIImage(data: bytes) {
+                let thumb = full.preparingThumbnail(of: CGSize(width: 200, height: 200))
+                thumbnailCache[item.id] = thumb ?? full
+            }
+        } catch {
+            // Thumbnail load failed — card shows placeholder
+        }
+    }
+
+    private func toggleSelection(_ id: UUID) {
+        if selectedIds.contains(id) {
+            selectedIds.remove(id)
+        } else {
+            selectedIds.insert(id)
+        }
+    }
+
+    private func selectAll() {
+        if selectedIds.count == displayedHistory.count {
+            selectedIds = []
+        } else {
+            selectedIds = Set(displayedHistory.map(\.id))
+        }
+    }
+
+    private func batchCopy() {
+        let items = displayedHistory.filter { selectedIds.contains($0.id) }
+        let texts = items.map(\.entry.text).joined(separator: "\n")
+        UIPasteboard.general.string = texts
+        exitSelectMode()
+    }
+
+    private func batchShare() {
+        let items = displayedHistory.filter { selectedIds.contains($0.id) }
+        let texts = items.map(\.entry.text)
+        guard !texts.isEmpty else { return }
+        let content: [Any] = [texts.joined(separator: "\n")]
+        let activityVC = UIActivityViewController(activityItems: content, applicationActivities: nil)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = windowScene.windows.first?.rootViewController {
+            var topVC = root
+            while let presented = topVC.presentedViewController { topVC = presented }
+            activityVC.popoverPresentationController?.sourceView = topVC.view
+            activityVC.popoverPresentationController?.sourceRect = CGRect(
+                x: topVC.view.bounds.midX, y: topVC.view.bounds.maxY - 100, width: 0, height: 0
+            )
+            topVC.present(activityVC, animated: true)
+        }
+        exitSelectMode()
+    }
+
+    private func batchDelete() {
+        for id in selectedIds {
+            vm.removeHistoryItem(id: id)
+        }
+        exitSelectMode()
+    }
+
+    private func exitSelectMode() {
+        isSelectMode = false
+        selectedIds = []
+    }
+
+    private func shareItem(_ item: ClipboardHistoryItem) {
+        var shareContent: [Any] = []
+        switch item.entry.type {
+        case .text:
+            shareContent = [item.entry.text]
+        case .image:
+            if let cached = thumbnailCache[item.id] {
+                shareContent = [cached]
+            } else {
+                shareContent = [item.entry.text]
+            }
+        case .file, .group:
+            shareContent = [item.entry.dataName ?? item.entry.text]
+        }
+        guard !shareContent.isEmpty else { return }
+        let activityVC = UIActivityViewController(activityItems: shareContent, applicationActivities: nil)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = windowScene.windows.first?.rootViewController {
+            // Find the topmost presented controller
+            var topVC = root
+            while let presented = topVC.presentedViewController { topVC = presented }
+            activityVC.popoverPresentationController?.sourceView = topVC.view
+            activityVC.popoverPresentationController?.sourceRect = CGRect(
+                x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0
+            )
+            topVC.present(activityVC, animated: true)
+        }
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
+    // MARK: - Error handling
+
     private var currentIssue: HomeIssue? {
         if let err = vm.saveError {
             return .saveFailed(message: errorMessage(err), detail: err.underlying)
@@ -353,16 +707,12 @@ struct HomeView: View {
             if let err = vm.engine.lastError {
                 return .offline(message: errorMessage(err), detail: err.underlying)
             }
-            return .offline(message: String(localized: "离线 · 重试中"), detail: nil)
+            return .offline(message: String(localized: "离线 \u{00B7} 重试中"), detail: nil)
         case .loopDetected:
             return .loopDetected(detail: vm.engine.lastError?.underlying)
         case .idle, .succeeded, .hasNewUnwritten:
             return nil
         }
-    }
-
-    private func displayPath(for url: URL) -> String {
-        url.pathComponents.suffix(2).joined(separator: "/")
     }
 
     private func errorMessage(_ err: SyncError) -> String {
@@ -381,310 +731,10 @@ struct HomeView: View {
     }
 }
 
-// MARK: - Date bucketing
+// MARK: - Paste Permission Banner
 
-/// Time-bucketed list section. Title is computed once during bucketing
-/// and stored so the view doesn't re-evaluate the calendar on every
-/// redraw. `id` is the bucket case so SwiftUI's diffing stays stable
-/// even when the items inside change.
-private struct HistorySection: Identifiable {
-    enum Bucket: Int, CaseIterable {
-        case today, yesterday, pastWeek, earlier
-
-        var title: String {
-            switch self {
-            case .today:     String(localized: "今天")
-            case .yesterday: String(localized: "昨天")
-            case .pastWeek:  String(localized: "7 天内")
-            case .earlier:   String(localized: "更早")
-            }
-        }
-    }
-
-    let id: Bucket
-    let title: String
-    let items: [ClipboardHistoryItem]
-
-    static func bucket(
-        _ items: [ClipboardHistoryItem],
-        now: Date = .now,
-        calendar: Calendar = .current
-    ) -> [HistorySection] {
-        var buckets: [Bucket: [ClipboardHistoryItem]] = [:]
-        for item in items {
-            buckets[Self.bucket(for: item.timestamp, now: now, calendar: calendar), default: []]
-                .append(item)
-        }
-        return Bucket.allCases.compactMap { b in
-            guard let items = buckets[b], !items.isEmpty else { return nil }
-            return HistorySection(id: b, title: b.title, items: items)
-        }
-    }
-
-    private static func bucket(for date: Date, now: Date, calendar: Calendar) -> Bucket {
-        if calendar.isDateInToday(date) { return .today }
-        if calendar.isDateInYesterday(date) { return .yesterday }
-        // Sliding 7-day window from `now`. Yesterday is carved out above,
-        // so this catches 2–7 days ago regardless of `firstWeekday`.
-        if let sevenAgo = calendar.date(byAdding: .day, value: -7, to: now),
-           date >= sevenAgo {
-            return .pastWeek
-        }
-        return .earlier
-    }
-}
-
-// MARK: - Row
-
-private struct ClipboardRow: View {
-    let item: ClipboardHistoryItem
-    let isLatest: Bool
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ClipboardKindBadge(kind: item.entry.type, size: .medium, showsLabel: false)
-                .padding(.top, 2)
-
-            VStack(alignment: .leading, spacing: 6) {
-                preview
-                metadataRow
-            }
-
-            Spacer(minLength: 0)
-
-            if isLatest {
-                latestPill
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private var preview: some View {
-        switch item.entry.type {
-        case .text:
-            Text(item.entry.text)
-                .font(.callout)
-                .foregroundStyle(.primary)
-                .lineLimit(3)
-                .multilineTextAlignment(.leading)
-        case .image, .file, .group:
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.entry.text)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if let dataName = item.entry.dataName, dataName != item.entry.text {
-                    Text(dataName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-        }
-    }
-
-    private var metadataRow: some View {
-        HStack(spacing: 6) {
-            Image(systemName: item.direction == .pulled ? "arrow.down" : "arrow.up")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(item.direction == .pulled ? Color.blue : Color.accentColor)
-            Text(item.timestamp.relativeShort)
-            if let size = item.entry.size {
-                Text("·").foregroundStyle(.tertiary)
-                Text(formatSize(size, kind: item.entry.type))
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
-
-    private var latestPill: some View {
-        Text("当前")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(Color(.systemBackground))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Color.accentColor, in: Capsule())
-            .accessibilityLabel(Text("当前剪贴板"))
-    }
-}
-
-// MARK: - Inline banners
-
-/// Inset rounded card pinned above the list when the engine has unwritten
-/// server content. Tapping "应用" pushes it into UIPasteboard. Sits inside
-/// the same scroll surface (safeAreaInset) so it scrolls with the list
-/// instead of orphaning at the top of the screen.
-/// Top-pinned nudge pair. The incoming row (server has new content → 应用)
-/// and the outgoing row (device has new content → 粘贴, via the prompt-free
-/// system `PasteButton`) share one rounded container with a hairline
-/// between, so the two read as a deliberate matched pair instead of two
-/// stacked look-alike cards. Either row may be absent. Neither row carries
-/// a dismiss control: both simply wait until the user acts or the
-/// underlying content changes (strict symmetry — and the free detection
-/// behind the outgoing row never reads content until the `PasteButton` is
-/// tapped, so a lingering row costs nothing and leaks nothing).
-private struct SyncNudgeStack: View {
-    let showPending: Bool
-    let onApply: () -> Void
-    /// Non-nil ⇒ render the outgoing row. Caller passes `nil` under
-    /// auto-push, when the engine pushes on its own.
-    let detection: PasteboardDetection?
-    let onPaste: ([NSItemProvider]) -> Void
-
-    var body: some View {
-        if showPending || detection != nil {
-            VStack(spacing: 0) {
-                if showPending {
-                    PendingRow(onApply: onApply)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                if showPending, detection != nil {
-                    Divider()
-                }
-                if let detection {
-                    PushRow(kind: detection.kind, onPaste: onPaste)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .background(
-                Color.accentColor.opacity(0.12),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-            )
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-            .transition(.move(edge: .top).combined(with: .opacity))
-        }
-    }
-}
-
-/// Incoming nudge: the server staged content the device hasn't written
-/// yet. Single-line so it height-matches `PushRow` in the shared container.
-private struct PendingRow: View {
-    let onApply: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.down.circle.fill")
-                .font(.title3)
-                .foregroundStyle(.tint)
-            Text("服务器有新内容")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Button(action: onApply) {
-                Text("应用")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color(.systemBackground))
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    }
-}
-
-/// Outgoing nudge: the FREE pasteboard detection (changeCount +
-/// hasStrings/hasImages, no content read) spotted new local content. The
-/// kind is folded into the title so the row stays single-line and
-/// symmetric with `PendingRow`. The actual read happens only when the user
-/// taps the embedded system `PasteButton`, which grants access without the
-/// "Allow Paste" prompt — the whole reason this is a `PasteButton` and not
-/// a plain button.
-private struct PushRow: View {
-    let kind: PasteboardDetection.Kind
-    let onPaste: ([NSItemProvider]) -> Void
-
-    private var title: LocalizedStringKey {
-        switch kind {
-        case .text:  "本机有新文本"
-        case .url:   "本机有新链接"
-        case .image: "本机有新图片"
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.up.circle.fill")
-                .font(.title3)
-                .foregroundStyle(.tint)
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            PasteButton(supportedContentTypes: PastedItemExtractor.supportedContentTypes, payloadAction: onPaste)
-                .labelStyle(.titleAndIcon)
-                .buttonBorderShape(.capsule)
-                .controlSize(.small)
-                .tint(.accentColor)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    }
-}
-
-/// Transient positive feedback after `applyAttachment(for:)`. Mirrors
-/// the SavedBanner layout but tints blue and points at the clipboard
-/// glyph — same visual vocabulary as the swipe-leading "复制" action.
-private struct AppliedBanner: View {
-    let name: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "doc.on.clipboard.fill")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.blue)
-            Text("已复制 \(name) 到剪贴板")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .truncationMode(.middle)
-            Spacer(minLength: 8)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.regularMaterial)
-        .overlay(alignment: .top) {
-            Divider().opacity(0.4)
-        }
-    }
-}
-
-/// Transient positive feedback after `saveServerAttachment()`. Cleared
-/// implicitly on the next refresh — same lifecycle as the old card's
-/// bottom bar, just rehomed to a banner.
-private struct SavedBanner: View {
-    let filePath: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.green)
-            Text("已保存到 \(filePath)")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-            Spacer(minLength: 8)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.regularMaterial)
-        .overlay(alignment: .top) {
-            Divider().opacity(0.4)
-        }
-    }
-}
-
-/// Home hint nudging the user to set「从其他 App 粘贴」to「允许」once they've turned
-/// on fully-automatic push — otherwise iOS prompts「允许粘贴」on every engine
+/// Home hint nudging the user to set "从其他 App 粘贴" to "允许" once they've turned
+/// on fully-automatic push -- otherwise iOS prompts "允许粘贴" on every engine
 /// read. Dismissible; the choice persists via `pastePermissionHintDismissed`.
 private struct PastePermissionBanner: View {
     var onOpenSettings: () -> Void
@@ -735,10 +785,6 @@ private enum HomeIssue: Equatable {
     case authFailed(detail: String?)
     case offline(message: String, detail: String?)
     case saveFailed(message: String, detail: String?)
-    /// Cycle-detector tripped: the engine paused itself because the same
-    /// clipboard hash was being applied and pushed in alternation. Primary
-    /// action calls `engine.acknowledgeLoopDetection()` to reset the
-    /// breaker and restart the loop.
     case loopDetected(detail: String?)
 
     enum PrimaryAction {
@@ -852,20 +898,23 @@ private struct IssueDetailSheet: View {
 
             Spacer(minLength: 0)
 
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Button(action: onPrimaryAction) {
                     Text(issue.primaryActionLabel)
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(height: 48)
+                        .padding(.horizontal, 32)
+                        .background(issue.tint, in: Capsule(style: .continuous))
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(issue.tint)
 
-                Button("关闭") { dismiss() }
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+                Button {
+                    dismiss()
+                } label: {
+                    Text("关闭")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
@@ -873,82 +922,22 @@ private struct IssueDetailSheet: View {
     }
 }
 
-// MARK: - Top toolbar server chip
-
-private struct ServerChip: View {
-    /// The server in use right now — the §5.3 effective server (manual
-    /// baseline + Wi-Fi overlay). Picking a different one here writes the
-    /// baseline `activeConfigId` via `onSelect`.
-    let activeServer: ServerConfig?
-    /// True when `activeServer` is the result of a Wi-Fi auto-switch rule
-    /// overriding the manual baseline — drives the small "自动" badge so the
-    /// user understands why the shown server differs from their last pick.
-    let isAutoSwitched: Bool
-    let allServers: [ServerConfig]
-    let onSelect: (String) -> Void
-
-    @State private var showingSwitcher: Bool =
-        ProcessInfo.processInfo.environment["UC_OPEN_SWITCHER"] == "1"
-
-    var body: some View {
-        // `.fixedSize(horizontal: true, ...)` is load-bearing — without it
-        // SwiftUI's navigation bar squeezes the leading toolbar item to
-        // ~30pt and truncates the alias Text to zero width.
-        HStack(spacing: 6) {
-            Circle()
-                .fill(.green)
-                .frame(width: 6, height: 6)
-            Text(verbatim: activeServer?.displayLabel ?? String(localized: "未配置"))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-            if isAutoSwitched {
-                Text("自动")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.tint)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Color.accentColor.opacity(0.15), in: Capsule())
-            }
-            Image(systemName: "chevron.down")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(.thinMaterial, in: Capsule())
-        .fixedSize(horizontal: true, vertical: false)
-        .contentShape(Capsule())
-        .onTapGesture { showingSwitcher = true }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(Text("切换服务器"))
-        .accessibilityValue(Text(activeServer?.displayLabel ?? String(localized: "未配置")))
-        .sheet(isPresented: $showingSwitcher) {
-            ServerSwitcherSheet(
-                activeId: activeServer?.id,
-                servers: allServers,
-                onSelect: { id in
-                    onSelect(id)
-                    showingSwitcher = false
-                }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-        }
-    }
-}
+// MARK: - Server Switcher Sheet
 
 private struct ServerSwitcherSheet: View {
-    let activeId: String?
-    let servers: [ServerConfig]
+    @Bindable var vm: AppViewModel
     let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var addDraft: ServerDraft?
+
+    private var activeId: String? { vm.activeServer?.id }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(servers) { server in
+                    ForEach(vm.servers.configs) { server in
                         Button {
                             onSelect(server.id)
                         } label: {
@@ -967,9 +956,61 @@ private struct ServerSwitcherSheet: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("切换服务器")
+            .navigationTitle("服务器")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        let existingNames = Set(vm.servers.configs.compactMap(\.name))
+                        addDraft = ServerDraft(existingNames: existingNames)
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            .sheet(item: $addDraft) { draft in
+                AddServerSheet(
+                    draft: draft,
+                    trustInsecureCert: Binding(
+                        get: { vm.appSettings.trustInsecureCert },
+                        set: { vm.appSettings.trustInsecureCert = $0 }
+                    ),
+                    ssidProvider: vm.ssidProvider,
+                    onCancel: { addDraft = nil },
+                    onSave: { saved in
+                        commitDraft(saved)
+                        addDraft = nil
+                    }
+                )
+            }
         }
+    }
+
+    private func commitDraft(_ draft: ServerDraft) {
+        let trimmedName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let server = ServerConfig(
+            id: UUID().uuidString.lowercased(),
+            name: trimmedName.isEmpty ? nil : trimmedName,
+            url: draft.url.trimmingCharacters(in: .whitespacesAndNewlines),
+            username: draft.username,
+            password: draft.password,
+            autoSwitchWifiNames: draft.ssids,
+            autoSwitchStrategy: draft.strategy
+        )
+        var list = vm.servers
+        list.configs.append(server)
+        if list.activeConfigId == nil || list.configs.count == 1 {
+            list.activeConfigId = server.id
+        }
+        vm.servers = list
     }
 }
 
@@ -1005,12 +1046,119 @@ private struct ServerSwitcherRow: View {
     }
 }
 
+// MARK: - Search Filter
+
+private enum SearchDateFilter: Hashable {
+    case all, today, yesterday, pastWeek
+
+    var label: String {
+        switch self {
+        case .all:       String(localized: "全部")
+        case .today:     String(localized: "今天")
+        case .yesterday: String(localized: "昨天")
+        case .pastWeek:  String(localized: "7 天内")
+        }
+    }
+
+    func apply(to items: [ClipboardHistoryItem]) -> [ClipboardHistoryItem] {
+        let cal = Calendar.current
+        switch self {
+        case .all:       return items
+        case .today:     return items.filter { cal.isDateInToday($0.timestamp) }
+        case .yesterday: return items.filter { cal.isDateInYesterday($0.timestamp) }
+        case .pastWeek:
+            guard let sevenAgo = cal.date(byAdding: .day, value: -7, to: .now) else { return items }
+            return items.filter { $0.timestamp >= sevenAgo }
+        }
+    }
+
+    static let allOptions: [SearchDateFilter] = [.all, .today, .yesterday, .pastWeek]
+}
+
+private extension Clipboard.Kind {
+    var localizedLabelString: String {
+        switch self {
+        case .text:  String(localized: "文本")
+        case .image: String(localized: "图片")
+        case .file:  String(localized: "文件")
+        case .group: String(localized: "归档")
+        }
+    }
+}
+
+private struct SearchFilterSheet: View {
+    @Binding var selectedTypes: Set<Clipboard.Kind>
+    @Binding var selectedDate: SearchDateFilter
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("类型") {
+                    ForEach(Clipboard.Kind.allCases, id: \.self) { kind in
+                        Button {
+                            if selectedTypes.contains(kind) {
+                                selectedTypes.remove(kind)
+                            } else {
+                                selectedTypes.insert(kind)
+                            }
+                        } label: {
+                            HStack {
+                                Image(systemName: kind.symbolName)
+                                    .foregroundStyle(kind.tint)
+                                    .frame(width: 24)
+                                Text(kind.localizedLabelString)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if selectedTypes.contains(kind) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section("日期") {
+                    ForEach(SearchDateFilter.allOptions, id: \.self) { option in
+                        Button {
+                            selectedDate = option
+                        } label: {
+                            HStack {
+                                Text(option.label)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if selectedDate == option {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("筛选条件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Helpers
 
 private extension Date {
-    /// "刚刚" inside ±5s, otherwise the system relative formatter. Without
-    /// the floor `RelativeDateTimeFormatter` happily returns "0 秒后" for
-    /// `lastSyncedAt == .now`, which reads as a bug.
+    /// "刚刚" inside +/-5s, otherwise the system relative formatter.
     var relativeShort: String {
         let dt = timeIntervalSinceNow
         if abs(dt) < 5 { return String(localized: "刚刚") }
@@ -1031,6 +1179,94 @@ private func formatSize(_ size: Int, kind: Clipboard.Kind) -> String {
     }
 }
 
+// MARK: - Context Menu Preview
+
+/// Custom preview shown by the native `.contextMenu(preview:)`. The system
+/// animates the zoom-from-source transition; this view just supplies content.
+/// Async-loaded images/long-text are fetched lazily in `.task`.
+private struct CardPreviewView: View {
+    let item: ClipboardHistoryItem
+    @Bindable var vm: AppViewModel
+
+    @State private var loadedImage: UIImage?
+    @State private var loadedText: String?
+    @State private var isLoading = false
+
+    var body: some View {
+        Group {
+            switch item.entry.type {
+            case .text:
+                ScrollView {
+                    Text(loadedText ?? item.entry.text)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                }
+
+            case .image:
+                if let image = loadedImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                } else if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
+            case .file, .group:
+                VStack(spacing: 12) {
+                    Image(systemName: item.entry.type.symbolName)
+                        .font(.system(size: 48))
+                        .foregroundStyle(item.entry.type.tint)
+                    Text(item.entry.dataName ?? item.entry.text)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                    if let size = item.entry.size {
+                        let f = ByteCountFormatter()
+                        Text(f.string(fromByteCount: Int64(size)))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(24)
+            }
+        }
+        .frame(minHeight: 300)
+        .frame(width: UIScreen.main.bounds.width - 32)
+        .task {
+            await loadContent()
+        }
+    }
+
+    private func loadContent() async {
+        switch item.entry.type {
+        case .text where item.entry.hasData:
+            isLoading = true
+            if let bytes = try? await vm.fetchPreviewBytes(for: item) {
+                loadedText = String(decoding: bytes, as: UTF8.self)
+            }
+            isLoading = false
+
+        case .image where item.entry.hasData:
+            isLoading = true
+            if let bytes = try? await vm.fetchPreviewBytes(for: item) {
+                loadedImage = UIImage(data: bytes)
+            }
+            isLoading = false
+
+        default:
+            break
+        }
+    }
+}
+
 // MARK: - Preview
 
 private func previewVM(history: [ClipboardHistoryItem]? = nil) -> AppViewModel {
@@ -1039,7 +1275,7 @@ private func previewVM(history: [ClipboardHistoryItem]? = nil) -> AppViewModel {
     return vm
 }
 
-#Preview("Home — 列表") {
+#Preview("Home — 网格") {
     NavigationStack {
         HomeView(vm: previewVM())
     }
