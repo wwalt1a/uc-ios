@@ -376,12 +376,43 @@ final class AppViewModel {
     func adoptConsentPush(_ entry: Clipboard) { pasteboard.adoptConsentPush(entry) }
 
     /// Re-copy a historical text entry back onto the device pasteboard.
-    /// The observer adopts the new value immediately, so the next
-    /// `SyncEngine` tick will publish it as the current clipboard via
-    /// `push()` (spec §2.2). Non-text entries are no-ops at this layer —
-    /// the row UI suppresses the action for those types.
+    /// Non-text entries are no-ops at this layer — the row UI suppresses
+    /// the action for those types.
     func reapplyText(_ text: String) {
         pasteboard.write(text: text)
+    }
+
+    /// Push a history entry to the server as the new "latest" so the next
+    /// sync tick sees matching hashes and doesn't overwrite the user's
+    /// selection. For entries with payload data (images/files), bytes are
+    /// fetched from the local cache or the history API (§2.11) and
+    /// re-uploaded via §3.5. Text-only entries need only the metadata PUT.
+    func pushHistoryEntryToServer(_ item: ClipboardHistoryItem) async {
+        let entry = item.entry
+        guard let server = activeServer else { return }
+        let engineState = engine.state
+        if engineState == .authFailed || engineState == .loopDetected { return }
+
+        do {
+            let client = try SyncClipboardClient(
+                server: server,
+                trustInsecureCert: appSettings.trustInsecureCert
+            )
+
+            if entry.hasData, let dataName = entry.dataName,
+               let hash = entry.hash, !hash.isEmpty {
+                let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
+                let bytes = try await Self.fetchHistory(client: client, profileId: profileId)
+                try await client.putFile(name: dataName, body: bytes)
+            }
+
+            try await client.putClipboard(entry)
+            serverLatest = entry
+        } catch {
+            return
+        }
+
+        engine.advanceSyncedForReapply(to: entry.hash)
     }
 
     /// Remove one row from the in-memory `history` list. Operates on the
@@ -635,6 +666,11 @@ final class AppViewModel {
         guard entry.hasData, let dataName = entry.dataName else {
             throw SyncError(kind: .notFound, underlying: "entry has no payload")
         }
+        // Local cache first — works offline.
+        if let hash = entry.hash, !hash.isEmpty,
+           let cached = store.loadImageData(hash: hash) {
+            return cached
+        }
         guard let server = activeServer else {
             throw SyncError(kind: .invalidURL, underlying: "no active server")
         }
@@ -647,6 +683,9 @@ final class AppViewModel {
             bytes = try await client.getFile(name: dataName)
         }
         try Self.verify(bytes: bytes, against: entry)
+        if let hash = entry.hash, !hash.isEmpty {
+            store.saveImageData(hash: hash, data: bytes)
+        }
         return bytes
     }
 
@@ -848,25 +887,13 @@ final class AppViewModel {
         }
     }
 
-    /// §4.4 verify, branching on the entry's type because the hash
-    /// algorithm differs: §4.1 (raw SHA256 over UTF-8 bytes) for text;
-    /// §4.2 (basename-bound) for image/file. Group is unimplemented and
-    /// the caller (saveServerAttachment) gates it out before reaching
-    /// here. Null/whitespace `entry.hash` short-circuits to a pass via
+    /// §4.4 verify: SHA-256 over raw bytes for all types. Group is
+    /// unimplemented and the caller gates it out before reaching here.
+    /// Null/whitespace `entry.hash` short-circuits to a pass via
     /// `hashMatches` semantics.
     private static func verify(bytes: Data, against entry: Clipboard) throws {
-        let actual: String
-        switch entry.type {
-        case .text:
-            actual = Clipboard.computeBytesHash(bytes)
-        case .image, .file:
-            guard let name = entry.dataName else {
-                throw SyncError(kind: .hashMismatch, underlying: "missing dataName for \(entry.type)")
-            }
-            actual = Clipboard.computeFileHash(name: name, bytes: bytes)
-        case .group:
-            return
-        }
+        if entry.type == .group { return }
+        let actual = Clipboard.computeBytesHash(bytes)
         guard Clipboard.hashMatches(expected: entry.hash, actual: actual) else {
             let expected = entry.hash ?? "<nil>"
             let name = entry.dataName ?? "<nil>"

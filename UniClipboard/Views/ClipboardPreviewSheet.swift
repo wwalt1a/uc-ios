@@ -26,6 +26,7 @@ struct ClipboardPreviewSheet: View {
     /// while the §2.11 round-trip is in flight; `.loaded` / `.failed`
     /// after.
     @State private var payload: PayloadState = .idle
+    @State private var urlMeta: URLCardMetadata?
 
     /// Cached decoded long-text body. Decoding `Data` → `String` once on
     /// load() avoids re-running UTF-8 decode on every body re-render —
@@ -109,12 +110,16 @@ struct ClipboardPreviewSheet: View {
             guard needsRemotePayload, case .idle = payload else { return }
             await load()
         }
+        .task {
+            guard item.entry.displayKind == .url, let url = item.entry.parsedURL else { return }
+            urlMeta = await URLMetadataCache.shared.fetch(for: url)
+        }
     }
 
     @ViewBuilder
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            ClipboardKindBadge(kind: item.entry.type, size: .medium, showsLabel: false)
+            ClipboardKindBadge(kind: item.entry.displayKind, size: .medium, showsLabel: false)
             VStack(alignment: .leading, spacing: 2) {
                 Text(headerTitle)
                     .font(.headline)
@@ -137,13 +142,12 @@ struct ClipboardPreviewSheet: View {
     }
 
     private var headerTitle: String {
-        switch item.entry.type {
+        switch item.entry.displayKind {
         case .text:
             return String(localized: "文本")
+        case .url:
+            return urlMeta?.title ?? item.entry.parsedURL?.host ?? item.entry.text
         case .image, .file, .group:
-            // Mirror the home row: prefer dataName when it differs from
-            // the label, so an image named `IMG_1234.jpg` stays
-            // distinguishable from a generic "image.png" label.
             if let dataName = item.entry.dataName,
                !dataName.isEmpty {
                 return dataName
@@ -154,14 +158,14 @@ struct ClipboardPreviewSheet: View {
 
     @ViewBuilder
     private var content: some View {
-        switch item.entry.type {
+        switch item.entry.displayKind {
         case .text:
             textContent
+        case .url:
+            urlContent
         case .image:
             imageContent
-        case .file:
-            fileContent
-        case .group:
+        case .file, .group:
             fileContent
         }
     }
@@ -297,17 +301,79 @@ struct ClipboardPreviewSheet: View {
         }
     }
 
+    // MARK: url
+
+    @ViewBuilder
+    private var urlContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let ogImage = urlMeta?.ogImage {
+                Image(uiImage: ogImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color(.separator).opacity(0.4), lineWidth: 0.5)
+                    )
+            } else if urlMeta == nil {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("正在获取链接预览…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 120)
+                .background(
+                    Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+            }
+
+            if let title = urlMeta?.title, !title.isEmpty {
+                Text(title)
+                    .font(.headline)
+            }
+
+            VStack(alignment: .leading) {
+                Text(item.entry.text)
+                    .font(.callout)
+                    .foregroundStyle(.blue)
+                    .textSelection(.enabled)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Color(.secondarySystemGroupedBackground),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+
+            if let url = item.entry.parsedURL {
+                Button {
+                    UIApplication.shared.open(url)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "safari")
+                        Text("在浏览器中打开")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.blue)
+                }
+            }
+        }
+    }
+
     // MARK: file / group
 
     @ViewBuilder
     private var fileContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                Image(systemName: item.entry.type.symbolName)
+                Image(systemName: item.entry.displayKind.symbolName)
                     .font(.system(size: 28))
                     .foregroundStyle(.white)
                     .frame(width: 52, height: 52)
-                    .background(item.entry.type.tint.gradient,
+                    .background(item.entry.displayKind.tint.gradient,
                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.entry.dataName ?? item.entry.text)
@@ -472,17 +538,12 @@ struct ClipboardPreviewSheet: View {
     }
 
     private var typeLabel: String {
-        switch item.entry.type {
-        case .text:  String(localized: "文本")
-        case .image: String(localized: "图片")
-        case .file:  String(localized: "文件")
-        case .group: String(localized: "归档")
-        }
+        item.entry.displayKind.localizedLabelString
     }
 
     private func sizeLabel(_ size: Int) -> String {
-        switch item.entry.type {
-        case .text:
+        switch item.entry.displayKind {
+        case .text, .url:
             return String(localized: "\(size) 字")
         case .image, .file, .group:
             return formatFileSize(size)

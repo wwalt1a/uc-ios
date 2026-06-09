@@ -30,9 +30,13 @@ struct KeyboardUploader {
         if entry.hasData, let payload = snapshot.payload, let name = entry.dataName {
             try await client.putFile(name: name, body: payload)
         }
+        try await client.putClipboard(entry)
+        // Write the hash watermark AFTER a confirmed PUT — not before.
+        // Writing before opens a race: pollTick can cancel this task
+        // mid-PUT, leaving a stale watermark that causes the next cycle
+        // to skip the push entirely.
         if let hash = entry.hash, !hash.isEmpty {
             store.saveLastSyncedHash(hash)
         }
-        try await client.putClipboard(entry)
     }
 }

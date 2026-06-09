@@ -4,7 +4,7 @@ import SwiftUI
 struct ClipboardKindBadge: View {
     enum Size { case small, medium, large }
 
-    let kind: Clipboard.Kind
+    let kind: ClipboardDisplayKind
     var size: Size = .medium
     var showsLabel: Bool = true
 
@@ -14,7 +14,8 @@ struct ClipboardKindBadge: View {
                 .font(size.glyphFont)
                 .foregroundStyle(.white)
                 .frame(width: size.iconBox, height: size.iconBox)
-                .background(kind.tint.gradient, in: RoundedRectangle(cornerRadius: size.iconCorner, style: .continuous))
+                .background(kind.tint.gradient,
+                            in: RoundedRectangle(cornerRadius: size.iconCorner, style: .continuous))
 
             if showsLabel {
                 Text(kind.localizedLabel)
@@ -74,7 +75,7 @@ private extension ClipboardKindBadge.Size {
 
 #Preview("Badges") {
     VStack(alignment: .leading, spacing: 16) {
-        ForEach(Clipboard.Kind.allCases, id: \.self) { kind in
+        ForEach(ClipboardDisplayKind.allCases, id: \.self) { kind in
             HStack(spacing: 16) {
                 ClipboardKindBadge(kind: kind, size: .small)
                 ClipboardKindBadge(kind: kind, size: .medium)

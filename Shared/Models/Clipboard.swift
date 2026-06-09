@@ -145,7 +145,7 @@ public extension Clipboard {
         let dataName = "image.\(ext)"
         let entry = Clipboard(
             type: .image,
-            hash: computeFileHash(name: dataName, bytes: bytes),
+            hash: computeBytesHash(bytes),
             text: dataName,
             hasData: true,
             dataName: dataName,
@@ -164,7 +164,7 @@ public extension Clipboard {
         let safe = sanitizedFilename(name)
         let entry = Clipboard(
             type: .file,
-            hash: computeFileHash(name: safe, bytes: bytes),
+            hash: computeBytesHash(bytes),
             text: safe,
             hasData: true,
             dataName: safe,

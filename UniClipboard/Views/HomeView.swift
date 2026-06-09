@@ -20,10 +20,11 @@ struct HomeView: View {
     @State private var pinnedItemId: UUID?
     @State private var loadingItemIds: Set<UUID> = []
     @State private var thumbnailCache: [UUID: UIImage] = [:]
+    @State private var urlMetadataCache: [UUID: URLCardMetadata] = [:]
     @State private var isSearching: Bool = false
     @State private var searchText: String = ""
     @FocusState private var isSearchFocused: Bool
-    @State private var filterTypes: Set<Clipboard.Kind> = []
+    @State private var filterTypes: Set<ClipboardDisplayKind> = []
     @State private var filterDate: SearchDateFilter = .all
     @State private var showingFilterSheet: Bool = false
     @State private var isSelectMode: Bool = false
@@ -74,7 +75,7 @@ struct HomeView: View {
                 }
             }
             if !filterTypes.isEmpty {
-                items = items.filter { filterTypes.contains($0.entry.type) }
+                items = items.filter { filterTypes.contains($0.entry.displayKind) }
             }
             items = filterDate.apply(to: items)
         }
@@ -243,6 +244,8 @@ struct HomeView: View {
                 .padding(.bottom, 16)
             }
             .animation(.snappy, value: pinnedItemId)
+            .task { preloadThumbnails() }
+            .onChange(of: vm.history.count) { _, _ in preloadThumbnails() }
         }
     }
 
@@ -356,6 +359,7 @@ struct HomeView: View {
             item: item,
             isLatest: item.id == latestId,
             thumbnailImage: thumbnailCache[item.id],
+            urlMetadata: urlMetadataCache[item.id],
             isLoading: loadingItemIds.contains(item.id)
         )
         .overlay {
@@ -387,6 +391,7 @@ struct HomeView: View {
         }
         .task {
             await loadThumbnailIfNeeded(for: item)
+            await loadURLMetadataIfNeeded(for: item)
         }
         .animation(.snappy, value: isSelectMode)
         .animation(.snappy, value: isSelected)
@@ -476,8 +481,8 @@ struct HomeView: View {
     // MARK: - Actions
 
     private func handleTapToCopy(_ item: ClipboardHistoryItem) {
-        switch item.entry.type {
-        case .text:
+        switch item.entry.displayKind {
+        case .text, .url:
             vm.reapplyText(item.entry.text)
             withAnimation(.snappy) {
                 pinnedItemId = item.id
@@ -485,6 +490,7 @@ struct HomeView: View {
             let generator = UIImpactFeedbackGenerator(style: .light)
             generator.impactOccurred()
             schedulePinReset()
+            Task { await vm.pushHistoryEntryToServer(item) }
 
         case .image:
             guard item.entry.hasData else { return }
@@ -498,10 +504,12 @@ struct HomeView: View {
                 let generator = UIImpactFeedbackGenerator(style: .light)
                 generator.impactOccurred()
                 schedulePinReset()
+                if vm.applyError == nil {
+                    await vm.pushHistoryEntryToServer(item)
+                }
             }
 
         case .file, .group:
-            // Copy the filename text
             UIPasteboard.general.string = item.entry.dataName ?? item.entry.text
             withAnimation(.snappy) {
                 pinnedItemId = item.id
@@ -509,19 +517,27 @@ struct HomeView: View {
             let generator = UIImpactFeedbackGenerator(style: .light)
             generator.impactOccurred()
             schedulePinReset()
+            Task { await vm.pushHistoryEntryToServer(item) }
         }
     }
 
     private func handleCopyFromOverlay(_ item: ClipboardHistoryItem) {
-        switch item.entry.type {
-        case .text:
+        switch item.entry.displayKind {
+        case .text, .url:
             vm.reapplyText(item.entry.text)
+            Task { await vm.pushHistoryEntryToServer(item) }
         case .image:
             if item.entry.hasData {
-                Task { await vm.applyAttachment(for: item) }
+                Task {
+                    await vm.applyAttachment(for: item)
+                    if vm.applyError == nil {
+                        await vm.pushHistoryEntryToServer(item)
+                    }
+                }
             }
         case .file, .group:
             UIPasteboard.general.string = item.entry.dataName ?? item.entry.text
+            Task { await vm.pushHistoryEntryToServer(item) }
         }
     }
 
@@ -546,8 +562,21 @@ struct HomeView: View {
             Label("复制", systemImage: "doc.on.doc")
         }
 
-        switch item.entry.type {
+        switch item.entry.displayKind {
         case .text:
+            Button {
+                UIPasteboard.general.string = item.entry.text
+            } label: {
+                Label("复制为纯文本", systemImage: "doc.plaintext")
+            }
+        case .url:
+            if let url = item.entry.parsedURL {
+                Button {
+                    UIApplication.shared.open(url)
+                } label: {
+                    Label("在浏览器中打开", systemImage: "safari")
+                }
+            }
             Button {
                 UIPasteboard.general.string = item.entry.text
             } label: {
@@ -589,21 +618,43 @@ struct HomeView: View {
         }
     }
 
+    private func preloadThumbnails() {
+        for item in vm.history {
+            guard item.entry.type == .image,
+                  item.entry.hasData,
+                  thumbnailCache[item.id] == nil,
+                  let hash = item.entry.hash, !hash.isEmpty
+            else { continue }
+            if let cached = ImageThumbnailCache.shared.cached(forHash: hash) {
+                thumbnailCache[item.id] = cached
+                continue
+            }
+            Task { await loadThumbnailIfNeeded(for: item) }
+        }
+    }
+
     private func loadThumbnailIfNeeded(for item: ClipboardHistoryItem) async {
         guard item.entry.type == .image,
               item.entry.hasData,
-              thumbnailCache[item.id] == nil
+              thumbnailCache[item.id] == nil,
+              let hash = item.entry.hash, !hash.isEmpty
         else { return }
 
-        do {
-            let bytes = try await vm.fetchPreviewBytes(for: item)
-            if let full = UIImage(data: bytes) {
-                let thumb = full.preparingThumbnail(of: CGSize(width: 200, height: 200))
-                thumbnailCache[item.id] = thumb ?? full
-            }
-        } catch {
-            // Thumbnail load failed — card shows placeholder
+        let thumb = await ImageThumbnailCache.shared.fetch(forHash: hash) {
+            try await vm.fetchPreviewBytes(for: item)
         }
+        if let thumb {
+            thumbnailCache[item.id] = thumb
+        }
+    }
+
+    private func loadURLMetadataIfNeeded(for item: ClipboardHistoryItem) async {
+        guard item.entry.displayKind == .url,
+              urlMetadataCache[item.id] == nil,
+              let url = item.entry.parsedURL
+        else { return }
+        let metadata = await URLMetadataCache.shared.fetch(for: url)
+        urlMetadataCache[item.id] = metadata
     }
 
     private func toggleSelection(_ id: UUID) {
@@ -662,9 +713,15 @@ struct HomeView: View {
 
     private func shareItem(_ item: ClipboardHistoryItem) {
         var shareContent: [Any] = []
-        switch item.entry.type {
+        switch item.entry.displayKind {
         case .text:
             shareContent = [item.entry.text]
+        case .url:
+            if let url = item.entry.parsedURL {
+                shareContent = [url]
+            } else {
+                shareContent = [item.entry.text]
+            }
         case .image:
             if let cached = thumbnailCache[item.id] {
                 shareContent = [cached]
@@ -1075,19 +1132,8 @@ private enum SearchDateFilter: Hashable {
     static let allOptions: [SearchDateFilter] = [.all, .today, .yesterday, .pastWeek]
 }
 
-private extension Clipboard.Kind {
-    var localizedLabelString: String {
-        switch self {
-        case .text:  String(localized: "文本")
-        case .image: String(localized: "图片")
-        case .file:  String(localized: "文件")
-        case .group: String(localized: "归档")
-        }
-    }
-}
-
 private struct SearchFilterSheet: View {
-    @Binding var selectedTypes: Set<Clipboard.Kind>
+    @Binding var selectedTypes: Set<ClipboardDisplayKind>
     @Binding var selectedDate: SearchDateFilter
 
     @Environment(\.dismiss) private var dismiss
@@ -1096,7 +1142,7 @@ private struct SearchFilterSheet: View {
         NavigationStack {
             List {
                 Section("类型") {
-                    ForEach(Clipboard.Kind.allCases, id: \.self) { kind in
+                    ForEach(ClipboardDisplayKind.allCases, id: \.self) { kind in
                         Button {
                             if selectedTypes.contains(kind) {
                                 selectedTypes.remove(kind)
@@ -1168,9 +1214,9 @@ private extension Date {
     }
 }
 
-private func formatSize(_ size: Int, kind: Clipboard.Kind) -> String {
+private func formatSize(_ size: Int, kind: ClipboardDisplayKind) -> String {
     switch kind {
-    case .text:
+    case .text, .url:
         return String(localized: "\(size) 字")
     case .image, .file, .group:
         let formatter = ByteCountFormatter()
@@ -1190,11 +1236,13 @@ private struct CardPreviewView: View {
 
     @State private var loadedImage: UIImage?
     @State private var loadedText: String?
+    @State private var loadedOGImage: UIImage?
+    @State private var loadedURLTitle: String?
     @State private var isLoading = false
 
     var body: some View {
         Group {
-            switch item.entry.type {
+            switch item.entry.displayKind {
             case .text:
                 ScrollView {
                     Text(loadedText ?? item.entry.text)
@@ -1202,6 +1250,28 @@ private struct CardPreviewView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(16)
                 }
+
+            case .url:
+                VStack(alignment: .leading, spacing: 12) {
+                    if let ogImage = loadedOGImage {
+                        Image(uiImage: ogImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    } else if isLoading {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, minHeight: 120)
+                    }
+                    if let title = loadedURLTitle, !title.isEmpty {
+                        Text(title)
+                            .font(.headline)
+                    }
+                    Text(item.entry.text)
+                        .font(.callout)
+                        .foregroundStyle(.blue)
+                }
+                .padding(16)
 
             case .image:
                 if let image = loadedImage {
@@ -1221,9 +1291,9 @@ private struct CardPreviewView: View {
 
             case .file, .group:
                 VStack(spacing: 12) {
-                    Image(systemName: item.entry.type.symbolName)
+                    Image(systemName: item.entry.displayKind.symbolName)
                         .font(.system(size: 48))
-                        .foregroundStyle(item.entry.type.tint)
+                        .foregroundStyle(item.entry.displayKind.tint)
                     Text(item.entry.dataName ?? item.entry.text)
                         .font(.headline)
                         .lineLimit(2)
@@ -1246,11 +1316,20 @@ private struct CardPreviewView: View {
     }
 
     private func loadContent() async {
-        switch item.entry.type {
+        switch item.entry.displayKind {
         case .text where item.entry.hasData:
             isLoading = true
             if let bytes = try? await vm.fetchPreviewBytes(for: item) {
                 loadedText = String(decoding: bytes, as: UTF8.self)
+            }
+            isLoading = false
+
+        case .url:
+            isLoading = true
+            if let url = item.entry.parsedURL {
+                let meta = await URLMetadataCache.shared.fetch(for: url)
+                loadedOGImage = meta.ogImage
+                loadedURLTitle = meta.title
             }
             isLoading = false
 

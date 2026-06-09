@@ -678,6 +678,19 @@ final class SyncEngine {
         }
     }
 
+    /// Called after a successful server push of a re-applied history entry.
+    /// Advances the synced hash and clears any staged state so the next
+    /// tick doesn't pull the same entry back.
+    func advanceSyncedForReapply(to hash: String?) {
+        advanceSynced(to: hash)
+        stagedServerHash = nil
+        stagedEntry = nil
+        state = .succeeded
+        lastSyncedAt = .now
+        lastError = nil
+        consecutiveFailures = 0
+    }
+
     private func advanceSynced(to hash: String?) {
         // A nil/empty hash means the entry is unverifiable (hashMatches treats
         // it as a pass per §4.4). We can still mark it "synced for the moment"

@@ -3,6 +3,9 @@ import UIKit
 import ImageIO
 import Network
 import Observation
+import OSLog
+
+private let log = Logger(subsystem: "app.uniclipboard.keyboard", category: "sync")
 
 /// Observable state + sync logic backing the UniClip keyboard. Owned by
 /// `KeyboardViewController`; the SwiftUI `KeyboardRootView` reads its
@@ -253,6 +256,8 @@ final class KeyboardModel {
     /// once (the monitor can't restart after cancel) and torn down in
     /// `deinit`. A change re-runs the sync so the §5.3 effective server
     /// follows the network.
+    private var pathInitialized = false
+
     private func startPathMonitoring() {
         guard !pathMonitorStarted else { return }
         pathMonitorStarted = true
@@ -268,6 +273,10 @@ final class KeyboardModel {
                 self.pathIsWifi = wifi
                 self.pathIsCellular = cellular
                 self.pathIsTailscale = tailscale
+                guard self.pathInitialized else {
+                    self.pathInitialized = true
+                    return
+                }
                 if changed, self.hasFullAccess { self.refresh() }
             }
         }
@@ -353,13 +362,27 @@ final class KeyboardModel {
         soundFeedback = settings.keyboardSoundFeedback
         hapticFeedback = settings.keyboardHapticFeedback
 
-        // Record local clipboard changes regardless of server availability.
-        recordLocalClipboardIfNew()
+        // Read the pasteboard once — the content read triggers iOS's
+        // "允许粘贴" prompt, so we gate on changeCount and share the
+        // snapshot between the record and push paths. changeCount is
+        // stamped only after the push completes (or in the no-server
+        // early return) to avoid the record path blocking the push.
+        let cc = UIPasteboard.general.changeCount
+        let storedCC = store.loadLastSyncedChangeCount()
+        let ccChanged = cc != storedCC
+        let snap: DeviceClipboardSnapshot? = (ccChanged || force) ? PasteboardReader.snapshot() : nil
+        log.info("sync: cc=\(cc) stored=\(storedCC ?? -1) ccChanged=\(ccChanged) force=\(force) snap=\(snap != nil) snapHash=\(snap?.clipboard.hash ?? "nil")")
+
+        recordLocalClipboardIfNew(snap)
+        if let snap, let payload = snap.payload, let hash = snap.clipboard.hash {
+            store.saveImageData(hash: hash, data: payload)
+        }
         reloadCards()
 
         let server = servers.effectiveActiveConfig(network: currentNetworkContext())
         guard let server else {
             gate = .noServer
+            store.saveLastSyncedChangeCount(cc)
             if force {
                 lastError = String(localized: "尚未配置服务器，请先在主程序中添加")
                 flashSync(.failure)
@@ -375,9 +398,10 @@ final class KeyboardModel {
         isSyncing = true
 
         // ---- Uplink: push the device pasteboard if it carries new content.
-        await pushDeviceClipboardIfNew(store: store, server: server, trust: trust, force: force)
+        await pushDeviceClipboardIfNew(snap, changeCount: cc, server: server, trust: trust)
         guard gen == syncGeneration else { return }
         let didPush: Bool = { if case .pushed = pushStatus { return true } else { return false } }()
+        log.info("sync uplink done: pushStatus=\(String(describing: self.pushStatus)) didPush=\(didPush)")
         reloadCards()
 
         // ---- Downlink: pull the server's latest *metadata* (small JSON) and
@@ -387,10 +411,29 @@ final class KeyboardModel {
             let client = try SyncClipboardClient(server: server, trustInsecureCert: trust)
             let latest = try await client.getClipboard()
             guard gen == syncGeneration else { return }
-            let pulledNew = appendPulledIfNew(latest)
-            reloadCards()
-            lastError = nil
-            if force || didPush || pulledNew { flashSync(.success) }
+
+            if didPush {
+                // We just pushed — the server's latest IS our content. The
+                // server may compute a different profile hash for images
+                // (it derives a different filename component), so we adopt
+                // the server's hash as our watermark. This prevents both
+                // this keyboard and the main app from re-pulling the same
+                // content as a "new" entry.
+                if let serverHash = latest.hash, !serverHash.isEmpty {
+                    log.info("sync post-push: adopting server hash \(serverHash.prefix(16))… (was \(self.store.loadLastSyncedHash()?.prefix(16) ?? "nil"))")
+                    store.saveLastSyncedHash(serverHash)
+                }
+                lastError = nil
+                flashSync(.success)
+            } else {
+                let historyHeadHash = store.loadHistory().first?.entry.hash
+                log.info("sync pull: serverHash=\(latest.hash ?? "nil") serverType=\(latest.type.rawValue) historyHeadHash=\(historyHeadHash ?? "nil") lastSyncedHash=\(self.store.loadLastSyncedHash() ?? "nil")")
+                let pulledNew = appendPulledIfNew(latest)
+                log.info("sync pull result: pulledNew=\(pulledNew)")
+                reloadCards()
+                lastError = nil
+                if force || pulledNew { flashSync(.success) }
+            }
         } catch {
             guard gen == syncGeneration else { return }
             lastError = Self.message(for: error)
@@ -400,64 +443,50 @@ final class KeyboardModel {
         if gen == syncGeneration { isSyncing = false }
     }
 
-    private func recordLocalClipboardIfNew() {
-        let cc = UIPasteboard.general.changeCount
-        if cc == store.loadLastSyncedChangeCount() { return }
-        guard let snap = PasteboardReader.snapshot(),
-              let hash = snap.clipboard.hash?.uppercased() else {
-            store.saveLastSyncedChangeCount(cc)
-            return
-        }
-        if hash == store.loadLastSyncedHash()?.uppercased() {
-            store.saveLastSyncedChangeCount(cc)
-            return
-        }
-        if store.loadHistory().first?.entry.hash?.uppercased() == hash {
-            store.saveLastSyncedChangeCount(cc)
-            return
-        }
+    /// Record the device pasteboard to the shared history log if it carries
+    /// content we haven't seen. Does NOT stamp the changeCount watermark —
+    /// that's deferred to pushDeviceClipboardIfNew so the push path isn't
+    /// blocked by the record path having already stamped it.
+    private func recordLocalClipboardIfNew(_ snap: DeviceClipboardSnapshot?) {
+        guard let snap, let hash = snap.clipboard.hash?.uppercased() else { return }
+        if hash == store.loadLastSyncedHash()?.uppercased() { return }
+        if store.loadHistory().first?.entry.hash?.uppercased() == hash { return }
         store.appendHistory(entry: snap.clipboard, direction: .local)
-        store.saveLastSyncedChangeCount(cc)
     }
 
-    private func pushDeviceClipboardIfNew(store: SettingsStore, server: ServerConfig, trust: Bool, force: Bool) async {
-        // `changeCount` is free and never prompts. If nothing has been copied
-        // since our last sync, skip the *content* read entirely — that read
-        // is what fires iOS's "允许粘贴" prompt, so this keeps reopening the
-        // keyboard (without copying anything new) silent. `force` (manual ⟳)
-        // bypasses the gate to retry a failed push at an unchanged count.
-        let cc = UIPasteboard.general.changeCount
-        if !force, cc == store.loadLastSyncedChangeCount() {
-            pushStatus = .skipped
-            return
-        }
-
-        guard let snap = PasteboardReader.snapshot(),
-              let hash = snap.clipboard.hash?.uppercased() else {
+    /// Push the device pasteboard to the server if it carries new content.
+    /// Stamps the changeCount watermark on all exit paths so the poll tick
+    /// doesn't retry the same content.
+    private func pushDeviceClipboardIfNew(
+        _ snap: DeviceClipboardSnapshot?,
+        changeCount cc: Int,
+        server: ServerConfig,
+        trust: Bool
+    ) async {
+        guard let snap, let hash = snap.clipboard.hash?.uppercased() else {
+            log.info("push: snap nil or no hash → .none")
             store.saveLastSyncedChangeCount(cc)
             pushStatus = .none
             return
         }
-        // Already on the server (we — or the main app / Share Extension —
-        // synced this exact content). Don't re-push or it pings back.
-        if hash == store.loadLastSyncedHash() {
+        let lastHash = store.loadLastSyncedHash()?.uppercased()
+        if hash == lastHash {
+            log.info("push: hash==lastSyncedHash → .skipped (\(hash.prefix(16))…)")
             store.saveLastSyncedChangeCount(cc)
             pushStatus = .skipped
             return
         }
+        log.info("push: uploading hash=\(hash.prefix(16))… lastSynced=\(lastHash?.prefix(16) ?? "nil") type=\(snap.clipboard.type.rawValue)")
         do {
             try await KeyboardUploader(store: store).upload(snap, to: server, trustInsecureCert: trust)
             store.saveLastSyncedChangeCount(cc)
-            // Land the push in the shared history log so it shows up here and
-            // in the main app's Home list — the app's SyncEngine won't (it
-            // sees the watermark we just wrote and treats it as already synced).
             store.appendHistory(entry: snap.clipboard, direction: .pushed)
             pushStatus = .pushed(Self.summary(for: snap.clipboard))
+            log.info("push: success")
         } catch {
-            // Record the count even on failure so the live poll doesn't retry
-            // this same content every tick (which would re-prompt + re-hammer).
             store.saveLastSyncedChangeCount(cc)
             pushStatus = .failed(Self.message(for: error))
+            log.error("push: FAILED \(error)")
         }
     }
 
@@ -470,7 +499,7 @@ final class KeyboardModel {
     /// Returns `true` iff a genuinely new entry was appended.
     @discardableResult
     private func appendPulledIfNew(_ latest: Clipboard) -> Bool {
-        guard let hash = latest.hash, !hash.isEmpty else { return false }
+        guard let hash = latest.hash?.uppercased(), !hash.isEmpty else { return false }
         switch latest.type {
         case .text:
             if !latest.hasData && latest.text.isEmpty { return false }
@@ -480,6 +509,9 @@ final class KeyboardModel {
             return false
         }
         if store.loadHistory().first?.entry.hash?.uppercased() == hash {
+            return false
+        }
+        if hash == store.loadLastSyncedHash()?.uppercased() {
             return false
         }
         store.appendHistory(entry: latest, direction: .pulled)
@@ -619,21 +651,26 @@ final class KeyboardModel {
               let hash = card.entry.hash else { return nil }
         let key = hash as NSString
         if let cached = thumbnailCache.object(forKey: key) { return cached }
-        // Guard the *original* download: a self-hosted server may hold large
-        // originals, and we only want a thumbnail. 8 MB is comfortably above
-        // a screenshot/photo yet bounds the transient Data we hold.
         if let size = card.entry.size, size > 8 * 1024 * 1024 { return nil }
-        guard let ctx else { return nil }
-        do {
-            let client = try SyncClipboardClient(server: ctx.server, trustInsecureCert: ctx.trust)
-            let data = try await client.getFile(name: name)
-            if Task.isCancelled { return nil }
-            guard let img = Self.downsample(data: data, maxPixel: maxPixel) else { return nil }
-            thumbnailCache.setObject(img, forKey: key)
-            return img
-        } catch {
-            return nil
+
+        // Local cache first (App Group), then fall back to server.
+        let data: Data
+        if let local = store.loadImageData(hash: hash) {
+            data = local
+        } else {
+            guard let ctx else { return nil }
+            do {
+                let client = try SyncClipboardClient(server: ctx.server, trustInsecureCert: ctx.trust)
+                data = try await client.getFile(name: name)
+                if Task.isCancelled { return nil }
+                store.saveImageData(hash: hash, data: data)
+            } catch {
+                return nil
+            }
         }
+        guard let img = Self.downsample(data: data, maxPixel: maxPixel) else { return nil }
+        thumbnailCache.setObject(img, forKey: key)
+        return img
     }
 
     /// Decode `data` to a thumbnail no larger than `maxPixel` on its long

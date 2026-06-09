@@ -6,20 +6,26 @@ import UIKit
 ///
 /// Image cards use an immersive layout: the image fills the card height,
 /// letterboxed horizontally with a checkerboard grid in the margins.
+/// URL cards use an immersive layout: OG image fills the top 3/5,
+/// title + URL fill the bottom 2/5.
 /// Header/footer float over the image with gradient scrims.
 struct ClipboardCard: View {
     let item: ClipboardHistoryItem
     let isLatest: Bool
     var thumbnailImage: UIImage? = nil
+    var urlMetadata: URLCardMetadata? = nil
     var isLoading: Bool = false
 
     private let cardHeight: CGFloat = 180
 
     var body: some View {
         Group {
-            if item.entry.type == .image {
+            switch item.entry.displayKind {
+            case .image:
                 imageCardBody
-            } else {
+            case .url:
+                urlCardBody
+            case .text, .file, .group:
                 standardCardBody
             }
         }
@@ -54,7 +60,7 @@ struct ClipboardCard: View {
 
     @ViewBuilder
     private var standardBodyContent: some View {
-        switch item.entry.type {
+        switch item.entry.displayKind {
         case .text:
             Text(item.entry.text)
                 .font(.callout)
@@ -64,16 +70,16 @@ struct ClipboardCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .file, .group:
             fileBody
-        case .image:
+        case .image, .url:
             EmptyView()
         }
     }
 
     private var fileBody: some View {
         VStack(spacing: 6) {
-            Image(systemName: item.entry.type.symbolName)
+            Image(systemName: item.entry.displayKind.symbolName)
                 .font(.largeTitle)
-                .foregroundStyle(item.entry.type.tint)
+                .foregroundStyle(item.entry.displayKind.tint)
             Text(item.entry.dataName ?? item.entry.text)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -121,12 +127,78 @@ struct ClipboardCard: View {
     }
 
     private var imagePlaceholder: some View {
-        Color(item.entry.type.tint).opacity(0.12)
+        Color(item.entry.displayKind.tint).opacity(0.12)
             .overlay {
                 Image(systemName: "photo.fill")
                     .font(.largeTitle)
-                    .foregroundStyle(item.entry.type.tint.opacity(0.5))
+                    .foregroundStyle(item.entry.displayKind.tint.opacity(0.5))
             }
+    }
+
+    // MARK: - Immersive URL card
+
+    private var ogImageHeight: CGFloat { cardHeight * 3 / 5 }
+
+    private var urlCardBody: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                if let ogImage = urlMetadata?.ogImage {
+                    Color.clear.overlay {
+                        Image(uiImage: ogImage)
+                            .resizable()
+                            .scaledToFill()
+                    }
+                    .clipped()
+                } else {
+                    urlPlaceholder
+                }
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [.black.opacity(0.45), .clear],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: 36)
+                    Spacer(minLength: 0)
+                }
+                VStack {
+                    headerRow(style: .overlay)
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
+            }
+            .frame(height: ogImageHeight)
+            .clipped()
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(urlMetadata?.title ?? urlDomain)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(item.entry.urlWithoutScheme)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                bottomRow(style: .normal)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var urlPlaceholder: some View {
+        Color.cyan.opacity(0.12)
+            .overlay {
+                Image(systemName: "globe")
+                    .font(.system(size: 36))
+                    .foregroundStyle(Color.cyan.opacity(0.4))
+            }
+    }
+
+    private var urlDomain: String {
+        item.entry.parsedURL?.host ?? item.entry.urlWithoutScheme
     }
 
     // MARK: - Header / Bottom (dual style)
@@ -135,7 +207,7 @@ struct ClipboardCard: View {
 
     private func headerRow(style: MetaStyle) -> some View {
         HStack {
-            Text(item.entry.type.localizedLabel)
+            Text(item.entry.displayKind.localizedLabel)
                 .font(.caption.weight(style == .overlay ? .medium : .regular))
                 .foregroundStyle(style == .overlay ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
             Spacer(minLength: 4)
@@ -297,6 +369,30 @@ private extension Date {
     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
         ClipboardCard(item: item, isLatest: false)
         ClipboardCard(item: item, isLatest: false, isLoading: true)
+    }
+    .padding()
+    .background(Color(.systemGroupedBackground))
+}
+
+#Preview("URL card — with OG image") {
+    let item = ClipboardHistoryItem(
+        entry: Clipboard(
+            type: .text,
+            hash: "AABB",
+            text: "https://github.com/anthropics/claude-code",
+            hasData: false,
+            size: 43
+        ),
+        timestamp: .now.addingTimeInterval(-300),
+        direction: .pulled
+    )
+    let metadata = URLCardMetadata(
+        title: "GitHub - anthropics/claude-code",
+        ogImage: UIImage(systemName: "globe")
+    )
+    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+        ClipboardCard(item: item, isLatest: true, urlMetadata: metadata)
+        ClipboardCard(item: item, isLatest: false)
     }
     .padding()
     .background(Color(.systemGroupedBackground))

@@ -390,6 +390,23 @@ public final class SettingsStore: @unchecked Sendable {
         }
     }
 
+    // MARK: - Image data cache (App Group, shared with keyboard)
+
+    private var imageCacheDir: URL {
+        containerURL.appendingPathComponent("ImageData", isDirectory: true)
+    }
+
+    public func loadImageData(hash: String) -> Data? {
+        let file = imageCacheDir.appendingPathComponent("\(hash.uppercased()).dat")
+        return try? Data(contentsOf: file)
+    }
+
+    public func saveImageData(hash: String, data: Data) {
+        try? FileManager.default.createDirectory(at: imageCacheDir, withIntermediateDirectories: true)
+        let file = imageCacheDir.appendingPathComponent("\(hash.uppercased()).dat")
+        try? data.write(to: file, options: .atomic)
+    }
+
     // MARK: - ISO formatters (shared between watermark + future date keys)
 
     private static let fractionalISOFormatter: ISO8601DateFormatter = {

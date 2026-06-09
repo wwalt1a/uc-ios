@@ -74,6 +74,28 @@ enum Mock {
         ),
         ClipboardHistoryItem(
             entry: Clipboard(
+                type: .text,
+                hash: "A1B2C3D4E5F6071829304152637485A6B7C8D9E0F1A2B3C4D5E6F70819203142",
+                text: "https://github.com/anthropics/claude-code",
+                hasData: false,
+                size: 43
+            ),
+            timestamp: .now.addingTimeInterval(-90 * 60),
+            direction: .pulled
+        ),
+        ClipboardHistoryItem(
+            entry: Clipboard(
+                type: .text,
+                hash: "F2E3D4C5B6A70918273645504132241516071829304152637485968778695041",
+                text: "https://v2ex.com/t/1234567",
+                hasData: false,
+                size: 27
+            ),
+            timestamp: .now.addingTimeInterval(-5 * 3600),
+            direction: .pushed
+        ),
+        ClipboardHistoryItem(
+            entry: Clipboard(
                 type: .file,
                 hash: "088EA33D054B64459EA2EB0CBD9F9152DD0BE4C38C6350963BBA00FDDC94CCEA",
                 text: "report.pdf",
