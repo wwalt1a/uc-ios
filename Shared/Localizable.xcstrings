@@ -635,6 +635,17 @@
         }
       }
     },
+    "全选" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select All"
+          }
+        }
+      }
+    },
     "全部" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -675,6 +686,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Off (recommended): push with one tap of the Paste button on the home screen — iOS shows no prompt. When on, content you copy is read and pushed automatically; iOS shows an \"Allow Paste\" confirmation each time it reads content copied from another app."
+          }
+        }
+      }
+    },
+    "关闭搜索" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close search"
           }
         }
       }
@@ -809,6 +831,17 @@
         }
       }
     },
+    "分享所选" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share selected"
+          }
+        }
+      }
+    },
     "切换" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -882,6 +915,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Delete"
+          }
+        }
+      }
+    },
+    "删除 %lld 项?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete %lld items?"
+          }
+        }
+      }
+    },
+    "删除所选" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete selected"
           }
         }
       }
@@ -1100,6 +1155,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Cancel"
+          }
+        }
+      }
+    },
+    "取消全选" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deselect All"
           }
         }
       }
@@ -1400,6 +1466,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Copy to device"
+          }
+        }
+      }
+    },
+    "复制所选" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy selected"
           }
         }
       }
@@ -1857,8 +1934,16 @@
         }
       }
     },
-    "帮助" : {
-
+    "已选择 %lld 项" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld selected"
+          }
+        }
+      }
     },
     "应用" : {
       "extractionState" : "manual",
@@ -3193,6 +3278,17 @@
         }
       }
     },
+    "清除搜索" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear search"
+          }
+        }
+      }
+    },
     "清除缓存" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3348,6 +3444,17 @@
         }
       }
     },
+    "移除筛选 %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove filter %@"
+          }
+        }
+      }
+    },
     "稍后" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3377,6 +3484,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "space"
+          }
+        }
+      }
+    },
+    "立即同步" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync now"
           }
         }
       }

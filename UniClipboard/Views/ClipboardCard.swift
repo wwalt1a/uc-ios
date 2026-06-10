@@ -16,7 +16,7 @@ struct ClipboardCard: View {
     var urlMetadata: URLCardMetadata? = nil
     var isLoading: Bool = false
 
-    private let cardHeight: CGFloat = 180
+    @ScaledMetric private var cardHeight: CGFloat = 180
 
     var body: some View {
         Group {
@@ -32,7 +32,15 @@ struct ClipboardCard: View {
         .frame(maxWidth: .infinity)
         .frame(height: cardHeight)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .liquidGlassCard(cornerRadius: 14)
+        // Opaque elevated surface — content cards must not use Liquid Glass.
+        // secondarySystemGroupedBackground is the system color designed to sit
+        // on systemGroupedBackground; a soft low-opacity shadow supplies the
+        // Paste-style elevation cue without sampling a backdrop.
+        .background(
+            Color(.secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 5, y: 2)
         .overlay {
             if isLoading {
                 Color(.systemBackground).opacity(0.6)

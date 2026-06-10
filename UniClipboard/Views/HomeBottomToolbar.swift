@@ -6,6 +6,12 @@ struct HomeBottomToolbar: View {
     let serverLabel: String
     var isAutoSwitched: Bool = false
     var isSyncing: Bool = false
+    /// Shared glass namespace from the host so the search button can liquid-morph
+    /// into the search field's capsule when search opens. `nil` in standalone use
+    /// (e.g. previews), where the search button simply renders without morphing.
+    /// The host wraps this toolbar in the unified `GlassEffectContainer`, so this
+    /// view no longer supplies its own `GlassGroup`.
+    var glassNamespace: Namespace.ID? = nil
     let onSearch: () -> Void
     let onServerPicker: () -> Void
     let onSync: () -> Void
@@ -16,8 +22,10 @@ struct HomeBottomToolbar: View {
                 Image(systemName: "magnifyingglass")
                     .font(.title2)
                     .frame(width: 52, height: 52)
-                    .liquidGlassCircle()
+                    .liquidGlassCircle(interactive: true)
+                    .glassMorphID("search", in: glassNamespace)
             }
+            .accessibilityLabel(Text("搜索"))
 
             Spacer()
 
@@ -32,7 +40,7 @@ struct HomeBottomToolbar: View {
                 }
                 .frame(height: 52)
                 .padding(.horizontal, 16)
-                .liquidGlassCapsule()
+                .liquidGlassCapsule(interactive: true)
                 .overlay(alignment: .topTrailing) {
                     if isAutoSwitched {
                         Text("自动")
@@ -45,6 +53,7 @@ struct HomeBottomToolbar: View {
                     }
                 }
             }
+            .accessibilityHint(Text("切换服务器"))
 
             Spacer()
 
@@ -59,9 +68,10 @@ struct HomeBottomToolbar: View {
                     }
                 }
                 .frame(width: 52, height: 52)
-                .liquidGlassCircle()
+                .liquidGlassCircle(interactive: true)
             }
             .disabled(isSyncing)
+            .accessibilityLabel(Text("立即同步"))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -71,13 +81,17 @@ struct HomeBottomToolbar: View {
 #Preview {
     VStack {
         Spacer()
-        HomeBottomToolbar(
-            serverLabel: "My Server",
-            isAutoSwitched: true,
-            isSyncing: false,
-            onSearch: {},
-            onServerPicker: {},
-            onSync: {}
-        )
+        // Standalone preview supplies its own container; in the app the host
+        // (HomeView.bottomBar) wraps this in the unified GlassEffectContainer.
+        GlassGroup {
+            HomeBottomToolbar(
+                serverLabel: "My Server",
+                isAutoSwitched: true,
+                isSyncing: false,
+                onSearch: {},
+                onServerPicker: {},
+                onSync: {}
+            )
+        }
     }
 }

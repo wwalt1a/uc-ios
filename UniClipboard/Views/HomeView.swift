@@ -29,8 +29,15 @@ struct HomeView: View {
     @State private var showingFilterSheet: Bool = false
     @State private var isSelectMode: Bool = false
     @State private var selectedIds: Set<UUID> = []
+    @State private var showingDeleteConfirm: Bool = false
     @State private var showingServerPicker: Bool =
         ProcessInfo.processInfo.environment["UC_OPEN_SWITCHER"] == "1"
+
+    /// Shared identity space for Liquid Glass morphing in the bottom bar. The
+    /// default toolbar's search circle and the search field's capsule both tag
+    /// themselves "search" in this namespace, so they liquid-morph into each
+    /// other when search opens/closes (see `bottomBar`).
+    @Namespace private var glassNS
 
     // MARK: - Derived
 
@@ -60,6 +67,12 @@ struct HomeView: View {
 
     private var hasActiveFilters: Bool {
         !filterTypes.isEmpty || filterDate != .all
+    }
+
+    /// True when every currently-displayed row is selected. Drives the
+    /// 全选 / 取消全选 label and is `false` when there's nothing to select.
+    private var allDisplayedSelected: Bool {
+        !displayedHistory.isEmpty && selectedIds.count == displayedHistory.count
     }
 
     /// Items displayed in the grid, filtered by search text + type + date.
@@ -146,7 +159,16 @@ struct HomeView: View {
 
     // MARK: - Top Bar
 
+    @ViewBuilder
     private var customTopBar: some View {
+        if isSelectMode {
+            selectModeTopBar
+        } else {
+            defaultTopBar
+        }
+    }
+
+    private var defaultTopBar: some View {
         HStack(spacing: 12) {
             // Left: server status (read-only)
             HStack(spacing: 6) {
@@ -161,51 +183,90 @@ struct HomeView: View {
 
             Spacer(minLength: 0)
 
-            // Error badge (if any)
-            if let issue = currentIssue {
-                Button {
-                    showingErrorSheet = true
-                } label: {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(issue.tint)
-                        .frame(width: 52, height: 52)
-                }
-                .accessibilityLabel(Text(issue.title))
-            }
+            // Trailing interactive glass cluster — grouped so their
+            // morph/blur sampling are coordinated on iOS 26+.
+            GlassGroup {
+                HStack(spacing: 12) {
+                    // Error badge (if any)
+                    if let issue = currentIssue {
+                        Button {
+                            showingErrorSheet = true
+                        } label: {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(issue.tint)
+                                .frame(width: 52, height: 52)
+                                .liquidGlassCircle(interactive: true)
+                        }
+                        .accessibilityLabel(Text(issue.title))
+                    }
 
-            // "选择" / "完成" capsule
-            Button {
-                if isSelectMode {
-                    exitSelectMode()
-                } else {
-                    isSelectMode = true
-                    selectedIds = []
-                }
-            } label: {
-                Text(isSelectMode ? "完成" : "选择")
-                    .font(.subheadline.weight(.medium))
-                    .frame(height: 52)
-                    .padding(.horizontal, 20)
-                    .liquidGlassCapsule()
-            }
+                    // "选择" capsule
+                    Button {
+                        isSelectMode = true
+                        selectedIds = []
+                    } label: {
+                        Text("选择")
+                            .font(.subheadline.weight(.medium))
+                            .frame(height: 52)
+                            .padding(.horizontal, 20)
+                            .liquidGlassCapsule(interactive: true)
+                    }
 
-            // "⋯" menu circle
-            Menu {
-                Button {
-                    onGoToSettings()
-                } label: {
-                    Label("设置", systemImage: "gearshape")
+                    // "⋯" menu circle
+                    Menu {
+                        Button {
+                            onGoToSettings()
+                        } label: {
+                            Label("设置", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.title2)
+                            .frame(width: 52, height: 52)
+                            .liquidGlassCircle(interactive: true)
+                    }
                 }
-                Button {
-                } label: {
-                    Label("帮助", systemImage: "questionmark.circle")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+    }
+
+    /// Select-mode variant: shows the selected count on the left and a
+    /// 全选/取消全选 + 完成 pair on the right. Server dot, error badge, and
+    /// the ⋯ menu are hidden while selecting.
+    private var selectModeTopBar: some View {
+        HStack(spacing: 12) {
+            Text("已选择 \(selectedIds.count) 项")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            GlassGroup {
+                HStack(spacing: 12) {
+                    Button {
+                        selectAll()
+                    } label: {
+                        Text(allDisplayedSelected ? "取消全选" : "全选")
+                            .font(.subheadline.weight(.medium))
+                            .frame(height: 52)
+                            .padding(.horizontal, 20)
+                            .liquidGlassCapsule(interactive: true)
+                    }
+
+                    Button {
+                        exitSelectMode()
+                    } label: {
+                        Text("完成")
+                            .font(.subheadline.weight(.medium))
+                            .frame(height: 52)
+                            .padding(.horizontal, 20)
+                            .liquidGlassCapsule(interactive: true)
+                    }
                 }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.title2)
-                    .frame(width: 52, height: 52)
-                    .liquidGlassCircle()
             }
         }
         .padding(.horizontal, 16)
@@ -217,20 +278,29 @@ struct HomeView: View {
     @ViewBuilder
     private var gridOrEmpty: some View {
         if sortedHistory.isEmpty {
-            ContentUnavailableView {
-                Label {
-                    Text("还没有同步过剪贴板")
-                } icon: {
-                    Image(systemName: "doc.on.clipboard")
+            // Wrap the empty state in a ScrollView so `.refreshable` (attached
+            // on the body) actually engages: ContentUnavailableView is not
+            // scrollable on its own, so pull-to-refresh never fired here —
+            // exactly when the user most wants to retry.
+            GeometryReader { proxy in
+                ScrollView(.vertical) {
+                    ContentUnavailableView {
+                        Label {
+                            Text("还没有同步过剪贴板")
+                        } icon: {
+                            Image(systemName: "doc.on.clipboard")
+                        }
+                    } description: {
+                        Text("服务器的新内容会自动出现在这里；本机内容点下方按钮推送")
+                    } actions: {
+                        PasteButton(supportedContentTypes: PastedItemExtractor.supportedContentTypes) { providers in
+                            Task { await vm.pushPastedProviders(providers) }
+                        }
+                        .tint(.accentColor)
+                        .accessibilityLabel(Text("推送本机剪贴板到服务器"))
+                    }
+                    .frame(minHeight: proxy.size.height)
                 }
-            } description: {
-                Text("服务器的新内容会自动出现在这里；本机内容点下方按钮推送")
-            } actions: {
-                PasteButton(supportedContentTypes: PastedItemExtractor.supportedContentTypes) { providers in
-                    Task { await vm.pushPastedProviders(providers) }
-                }
-                .tint(.accentColor)
-                .accessibilityLabel(Text("推送本机剪贴板到服务器"))
             }
         } else {
             ScrollView(.vertical) {
@@ -243,7 +313,11 @@ struct HomeView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 16)
             }
+            .scrollEdgeEffectStyleSoftTopBottom()
             .animation(.snappy, value: pinnedItemId)
+            // Fire a light haptic when a successful copy promotes an item to
+            // the pin slot. Replaces the old per-call UIImpactFeedbackGenerator.
+            .sensoryFeedback(.impact(weight: .light), trigger: pinnedItemId)
             .task { preloadThumbnails() }
             // Watch the array itself, not just its count: a push completion
             // flips the head row's direction IN PLACE (same-hash dedup), and
@@ -276,7 +350,11 @@ struct HomeView: View {
                 }
             }
 
-            // Search input row
+            // Search input row — the input capsule is NOT interactive glass
+            // (it hosts a text field, not a button); the filter and close
+            // circles are buttons, so they get interactive glass. No inner
+            // GlassGroup here: these live in bottomBar's unified container, so
+            // the capsule can morph in from the toolbar's "search" circle.
             HStack(spacing: 8) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
@@ -286,6 +364,8 @@ struct HomeView: View {
                         .font(.subheadline)
                         .textFieldStyle(.plain)
                         .focused($isSearchFocused)
+                        // Focus on appear instead of a hard-coded delay.
+                        .onAppear { isSearchFocused = true }
                     if !searchText.isEmpty {
                         Button {
                             searchText = ""
@@ -295,11 +375,13 @@ struct HomeView: View {
                                 .font(.caption)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(Text("清除搜索"))
                     }
                 }
                 .frame(height: 52)
                 .padding(.horizontal, 12)
                 .liquidGlassCapsule()
+                .glassMorphID("search", in: glassNS)
 
                 Button {
                     showingFilterSheet = true
@@ -308,8 +390,9 @@ struct HomeView: View {
                         .font(.title2)
                         .foregroundStyle(hasActiveFilters ? Color.accentColor : .primary)
                         .frame(width: 52, height: 52)
-                        .liquidGlassCircle()
+                        .liquidGlassCircle(interactive: true)
                 }
+                .accessibilityLabel(Text("筛选"))
 
                 Button {
                     withAnimation(.snappy) {
@@ -322,8 +405,9 @@ struct HomeView: View {
                     Image(systemName: "xmark")
                         .font(.title2)
                         .frame(width: 52, height: 52)
-                        .liquidGlassCircle()
+                        .liquidGlassCircle(interactive: true)
                 }
+                .accessibilityLabel(Text("关闭搜索"))
             }
             .padding(.horizontal, 16)
         }
@@ -339,18 +423,24 @@ struct HomeView: View {
     }
 
     private func filterTag(label: String, onRemove: @escaping () -> Void) -> some View {
-        HStack(spacing: 4) {
-            Text(label)
-                .font(.caption.weight(.medium))
-            Button(action: onRemove) {
+        // The whole tag is the hit target — tapping anywhere removes the
+        // filter. `.contentShape(Capsule())` + a 44pt minHeight give a
+        // comfortable target while staying visually compact.
+        Button(action: onRemove) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.caption.weight(.medium))
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.bold))
             }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .contentShape(Capsule())
+            .background(Color.accentColor.opacity(0.15), in: Capsule())
+            .foregroundStyle(Color.accentColor)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color.accentColor.opacity(0.15), in: Capsule())
-        .foregroundStyle(Color.accentColor)
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("移除筛选 \(label)"))
     }
 
     // MARK: - Card Cell
@@ -359,35 +449,42 @@ struct HomeView: View {
     private func cardCell(for item: ClipboardHistoryItem) -> some View {
         let isSelected = isSelectMode && selectedIds.contains(item.id)
 
-        ClipboardCard(
-            item: item,
-            isLatest: item.id == latestId,
-            thumbnailImage: thumbnailCache[item.id],
-            urlMetadata: urlMetadataCache[item.id],
-            isLoading: loadingItemIds.contains(item.id)
-        )
-        .overlay {
-            if isSelectMode {
-                ZStack {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.accentColor, lineWidth: 2)
-                    }
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 28))
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.6))
-                        .transition(.scale.combined(with: .opacity))
-                }
-            }
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .onTapGesture {
+        // Wrap the card in a Button so it gains the button accessibility
+        // trait + press feedback that `.onTapGesture` lacked. `.plain`
+        // preserves the card's own visuals. The select overlay, contextMenu,
+        // and `.task` loaders all stay attached to the button.
+        Button {
             if isSelectMode {
                 toggleSelection(item.id)
             } else {
                 handleTapToCopy(item)
             }
+        } label: {
+            ClipboardCard(
+                item: item,
+                isLatest: item.id == latestId,
+                thumbnailImage: thumbnailCache[item.id],
+                urlMetadata: urlMetadataCache[item.id],
+                isLoading: loadingItemIds.contains(item.id)
+            )
+            .overlay {
+                if isSelectMode {
+                    ZStack {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.accentColor, lineWidth: 2)
+                        }
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 28))
+                            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.6))
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(cardAccessibilityLabel(for: item)))
         .contextMenu {
             contextMenuItems(for: item)
         } preview: {
@@ -401,10 +498,38 @@ struct HomeView: View {
         .animation(.snappy, value: isSelected)
     }
 
+    /// VoiceOver label for a card: kind + a short content snippet.
+    private func cardAccessibilityLabel(for item: ClipboardHistoryItem) -> String {
+        let kind = item.entry.displayKind.localizedLabelString
+        let snippetSource: String
+        switch item.entry.displayKind {
+        case .file, .group:
+            snippetSource = item.entry.dataName ?? item.entry.text
+        default:
+            snippetSource = item.entry.text
+        }
+        let snippet = String(snippetSource.prefix(40))
+        // Both pieces are already runtime values (kind is localized; snippet is
+        // user content), so this is plain interpolation — not a catalog key.
+        return "\(kind):\(snippet)"
+    }
+
     // MARK: - Bottom Bar
 
     @ViewBuilder
+    /// One unified `GlassEffectContainer` wraps all three bottom-bar states so
+    /// glass elements that share a `glassMorphID` across states (the search
+    /// circle ↔ search capsule) liquid-morph instead of cross-fading. The inner
+    /// states must NOT nest their own containers, or the shared id can't morph
+    /// across them.
     private var bottomBar: some View {
+        GlassGroup {
+            bottomBarContent
+        }
+    }
+
+    @ViewBuilder
+    private var bottomBarContent: some View {
         if isSelectMode {
             selectModeBottomBar
         } else if isSearching {
@@ -414,12 +539,10 @@ struct HomeView: View {
                 serverLabel: vm.activeServer?.displayLabel ?? String(localized: "未配置"),
                 isAutoSwitched: vm.activeServer?.id != vm.servers.activeConfig?.id,
                 isSyncing: isExplicitlyRefreshing,
+                glassNamespace: glassNS,
                 onSearch: {
                     withAnimation(.snappy) {
                         isSearching = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        isSearchFocused = true
                     }
                 },
                 onServerPicker: {
@@ -433,6 +556,8 @@ struct HomeView: View {
     }
 
     private var selectModeBottomBar: some View {
+        // No inner GlassGroup: select mode lives in bottomBar's unified
+        // container alongside the other states (it has no morphing element).
         HStack(spacing: 24) {
             Spacer()
 
@@ -442,44 +567,56 @@ struct HomeView: View {
                 Image(systemName: "doc.on.doc")
                     .font(.title2)
                     .frame(width: 52, height: 52)
-                    .liquidGlassCircle()
+                    .liquidGlassCircle(interactive: true)
             }
             .disabled(selectedIds.isEmpty)
+            .accessibilityLabel(Text("复制所选"))
 
-            Button {
-                // Pin — placeholder for future pinboard feature
-            } label: {
-                Image(systemName: "pin")
-                    .font(.title2)
-                    .frame(width: 52, height: 52)
-                    .liquidGlassCircle()
-            }
-            .disabled(selectedIds.isEmpty)
-
-            Button {
-                batchShare()
-            } label: {
+            // Share the joined text of the selected rows. ShareLink
+            // replaces the old UIActivityViewController window walk.
+            ShareLink(item: selectedJoinedText) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.title2)
                     .frame(width: 52, height: 52)
-                    .liquidGlassCircle()
+                    .liquidGlassCircle(interactive: true)
             }
             .disabled(selectedIds.isEmpty)
+            .accessibilityLabel(Text("分享所选"))
 
             Button {
-                batchDelete()
+                showingDeleteConfirm = true
             } label: {
                 Image(systemName: "trash")
                     .font(.title2)
                     .foregroundStyle(.red)
                     .frame(width: 52, height: 52)
-                    .liquidGlassCircle()
+                    .liquidGlassCircle(interactive: true)
             }
             .disabled(selectedIds.isEmpty)
+            .accessibilityLabel(Text("删除所选"))
 
             Spacer()
         }
         .padding(.vertical, 10)
+        .confirmationDialog(
+            Text("删除 \(selectedIds.count) 项?"),
+            isPresented: $showingDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                batchDelete()
+            }
+            Button("取消", role: .cancel) {}
+        }
+    }
+
+    /// Joined text of currently-selected rows, newest-first. Used by the
+    /// select-mode ShareLink and as a stable item for `ShareLink(item:)`.
+    private var selectedJoinedText: String {
+        displayedHistory
+            .filter { selectedIds.contains($0.id) }
+            .map(\.entry.text)
+            .joined(separator: "\n")
     }
 
     // MARK: - Actions
@@ -491,8 +628,8 @@ struct HomeView: View {
             withAnimation(.snappy) {
                 pinnedItemId = item.id
             }
-            let generator = UIImpactFeedbackGenerator(style: .light)
-            generator.impactOccurred()
+            // Haptic fires via `.sensoryFeedback(trigger: pinnedItemId)` on
+            // the grid — setting the pin above is the trigger.
             schedulePinReset()
             Task { await vm.pushHistoryEntryToServer(item) }
 
@@ -507,8 +644,6 @@ struct HomeView: View {
                 withAnimation(.snappy) {
                     pinnedItemId = item.id
                 }
-                let generator = UIImpactFeedbackGenerator(style: .light)
-                generator.impactOccurred()
                 schedulePinReset()
                 await vm.pushHistoryEntryToServer(item)
             }
@@ -520,8 +655,6 @@ struct HomeView: View {
             withAnimation(.snappy) {
                 pinnedItemId = item.id
             }
-            let generator = UIImpactFeedbackGenerator(style: .light)
-            generator.impactOccurred()
             schedulePinReset()
             Task { await vm.pushHistoryEntryToServer(item) }
         }
@@ -602,11 +735,7 @@ struct HomeView: View {
             }
         }
 
-        Button {
-            shareItem(item)
-        } label: {
-            Label("分享", systemImage: "square.and.arrow.up")
-        }
+        shareLink(for: item)
 
         Divider()
 
@@ -621,6 +750,36 @@ struct HomeView: View {
             vm.removeHistoryItem(id: item.id)
         } label: {
             Label("删除", systemImage: "trash")
+        }
+    }
+
+    /// Context-menu 分享 action as a native ShareLink. Picks the most
+    /// useful payload per kind: URL for links, the loaded image (if cached)
+    /// for images, the file name for files, otherwise the text.
+    @ViewBuilder
+    private func shareLink(for item: ClipboardHistoryItem) -> some View {
+        let shareLabel = Label("分享", systemImage: "square.and.arrow.up")
+        switch item.entry.displayKind {
+        case .url:
+            if let url = item.entry.parsedURL {
+                ShareLink(item: url) { shareLabel }
+            } else {
+                ShareLink(item: item.entry.text) { shareLabel }
+            }
+        case .image:
+            if let cached = thumbnailCache[item.id] {
+                let image = Image(uiImage: cached)
+                ShareLink(
+                    item: image,
+                    preview: SharePreview(item.entry.dataName ?? item.entry.text, image: image)
+                ) { shareLabel }
+            } else {
+                ShareLink(item: item.entry.text) { shareLabel }
+            }
+        case .file, .group:
+            ShareLink(item: item.entry.dataName ?? item.entry.text) { shareLabel }
+        case .text:
+            ShareLink(item: item.entry.text) { shareLabel }
         }
     }
 
@@ -686,25 +845,6 @@ struct HomeView: View {
         exitSelectMode()
     }
 
-    private func batchShare() {
-        let items = displayedHistory.filter { selectedIds.contains($0.id) }
-        let texts = items.map(\.entry.text)
-        guard !texts.isEmpty else { return }
-        let content: [Any] = [texts.joined(separator: "\n")]
-        let activityVC = UIActivityViewController(activityItems: content, applicationActivities: nil)
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = windowScene.windows.first?.rootViewController {
-            var topVC = root
-            while let presented = topVC.presentedViewController { topVC = presented }
-            activityVC.popoverPresentationController?.sourceView = topVC.view
-            activityVC.popoverPresentationController?.sourceRect = CGRect(
-                x: topVC.view.bounds.midX, y: topVC.view.bounds.maxY - 100, width: 0, height: 0
-            )
-            topVC.present(activityVC, animated: true)
-        }
-        exitSelectMode()
-    }
-
     private func batchDelete() {
         for id in selectedIds {
             vm.removeHistoryItem(id: id)
@@ -715,41 +855,6 @@ struct HomeView: View {
     private func exitSelectMode() {
         isSelectMode = false
         selectedIds = []
-    }
-
-    private func shareItem(_ item: ClipboardHistoryItem) {
-        var shareContent: [Any] = []
-        switch item.entry.displayKind {
-        case .text:
-            shareContent = [item.entry.text]
-        case .url:
-            if let url = item.entry.parsedURL {
-                shareContent = [url]
-            } else {
-                shareContent = [item.entry.text]
-            }
-        case .image:
-            if let cached = thumbnailCache[item.id] {
-                shareContent = [cached]
-            } else {
-                shareContent = [item.entry.text]
-            }
-        case .file, .group:
-            shareContent = [item.entry.dataName ?? item.entry.text]
-        }
-        guard !shareContent.isEmpty else { return }
-        let activityVC = UIActivityViewController(activityItems: shareContent, applicationActivities: nil)
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = windowScene.windows.first?.rootViewController {
-            // Find the topmost presented controller
-            var topVC = root
-            while let presented = topVC.presentedViewController { topVC = presented }
-            activityVC.popoverPresentationController?.sourceView = topVC.view
-            activityVC.popoverPresentationController?.sourceRect = CGRect(
-                x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0
-            )
-            topVC.present(activityVC, animated: true)
-        }
     }
 
     private func openAppSettings() {
@@ -1220,6 +1325,22 @@ private extension Date {
     }
 }
 
+private extension View {
+    /// Applies the iOS 26 soft scroll-edge effect on top and bottom so the
+    /// floating top/bottom bars get the system blur/fade under scrolling
+    /// content. No-op below iOS 26.
+    @ViewBuilder
+    func scrollEdgeEffectStyleSoftTopBottom() -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .scrollEdgeEffectStyle(.soft, for: .bottom)
+        } else {
+            self
+        }
+    }
+}
+
 private func formatSize(_ size: Int, kind: ClipboardDisplayKind) -> String {
     switch kind {
     case .text, .url:
@@ -1246,16 +1367,25 @@ private struct CardPreviewView: View {
     @State private var loadedURLTitle: String?
     @State private var isLoading = false
 
+    /// Fixed preview width. The targeted-preview platform sizes the platter to
+    /// its content's intrinsic width — without a concrete width a short text or
+    /// a small thumbnail collapses to ~80pt and, paired with a tall height,
+    /// renders as a white pill (corner radius ≈ width/2). A fixed width keeps
+    /// every preview reading as a card; 340 fits the narrowest iOS-17 device.
+    private let previewWidth: CGFloat = 340
+
     var body: some View {
         Group {
             switch item.entry.displayKind {
             case .text:
-                ScrollView {
-                    Text(loadedText ?? item.entry.text)
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                }
+                // A line-limited Text hugs short content and caps long content,
+                // so the platter never stretches into a pill. (The full,
+                // scrollable text lives in ClipboardPreviewSheet on tap.)
+                Text(loadedText ?? item.entry.text)
+                    .font(.body)
+                    .lineLimit(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
 
             case .url:
                 VStack(alignment: .leading, spacing: 12) {
@@ -1280,20 +1410,22 @@ private struct CardPreviewView: View {
                 .padding(16)
 
             case .image:
-                if let image = loadedImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
-                } else if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    Image(systemName: "photo.fill")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Group {
+                    if let image = loadedImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                    } else if isLoading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "photo.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                // Reserve a box for the loading/placeholder states and cap a
+                // tall image so the platter stays card-shaped, not column-tall.
+                .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 460)
 
             case .file, .group:
                 VStack(spacing: 12) {
@@ -1314,8 +1446,9 @@ private struct CardPreviewView: View {
                 .padding(24)
             }
         }
-        .frame(minHeight: 300)
-        .frame(width: UIScreen.main.bounds.width - 32)
+        // Fixed width (not a cap): a max-only width lets small content collapse
+        // the platter into a pill. Height stays content-driven per case above.
+        .frame(width: previewWidth)
         .task {
             await loadContent()
         }
