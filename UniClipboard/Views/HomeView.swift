@@ -245,7 +245,11 @@ struct HomeView: View {
             }
             .animation(.snappy, value: pinnedItemId)
             .task { preloadThumbnails() }
-            .onChange(of: vm.history.count) { _, _ in preloadThumbnails() }
+            // Watch the array itself, not just its count: a push completion
+            // flips the head row's direction IN PLACE (same-hash dedup), and
+            // that's exactly the moment a previously-failed thumbnail load
+            // (it raced the PUT) becomes satisfiable from the local cache.
+            .onChange(of: vm.history) { _, _ in preloadThumbnails() }
         }
     }
 

@@ -278,6 +278,9 @@ final class SyncEngine {
         loopGuard.reset()
         lastError = nil
         state = .idle
+        // The old server's backoff window must not throttle the new one.
+        nextNetworkAttemptAt = nil
+        consecutiveFailures = 0
         // Force the next tick to hit /api/history/query immediately —
         // the new server's `lastModified` watermark is unrelated to the
         // old one's, so we have to refetch from scratch (the caller
@@ -320,10 +323,22 @@ final class SyncEngine {
         switch state {
         case .authFailed:       return .infinity
         case .loopDetected:     return .infinity
-        case .offlineRetrying:  return currentBackoffSeconds()
+        // `.offlineRetrying` deliberately keeps the NORMAL cadence: the
+        // tick still observes the local pasteboard every second (so a
+        // fresh copy lands a history card immediately even while the
+        // server is unreachable). The network half is gated separately by
+        // `nextNetworkAttemptAt`, which is what actually backs off.
         default:                return isSceneInactive ? inactiveCadenceSeconds : normalCadenceSeconds
         }
     }
+
+    /// Earliest moment the next NETWORK attempt may run. Set on a failed
+    /// tick from `currentBackoffSeconds()`; cleared on success. Ticks that
+    /// land inside the window still run the local pasteboard observation
+    /// but skip the server round-trip — backoff throttles the network, not
+    /// the user's own clipboard. Explicit refreshes bypass the window.
+    @ObservationIgnored
+    private var nextNetworkAttemptAt: Date?
 
     /// Exponential backoff with ±20% jitter. `consecutiveFailures == 1`
     /// → base; doubles up to `offlineBackoffMaxSeconds`. Jitter prevents
@@ -385,6 +400,12 @@ final class SyncEngine {
                let hash = device.hash?.uppercased(),
                hash != lastAppliedContentHash,
                !isHashInRecentHistory(vm: vm, hash: hash) {
+                // Seed BEFORE appending: the card renders (and its
+                // thumbnail loader fires) the moment the append lands,
+                // and locally-produced bytes must already be on disk by
+                // then — a local screenshot shows instantly, independent
+                // of whether/when the upload happens.
+                vm.seedLocalPayloadCache(for: device)
                 vm.appendHistory(entry: device, direction: .local)
             }
         } else {
@@ -395,6 +416,10 @@ final class SyncEngine {
             return
         }
         if state == .authFailed || state == .loopDetected { return }
+        // Network backoff gate. Local pasteboard observation above already
+        // ran — a copy made while the server is unreachable still lands its
+        // history card on the next 1s tick. Explicit refreshes punch through.
+        if !explicit, let next = nextNetworkAttemptAt, Date() < next { return }
         log.debug("tick: explicit=\(explicit, privacy: .public) state=\(String(describing: self.state), privacy: .public) url=\(server.url, privacy: .public) consecutiveFailures=\(self.consecutiveFailures, privacy: .public)")
         // Cross-process re-sync: the Share Extension writes
         // `lastSyncedContentHash` directly into the App Group when it
@@ -426,6 +451,24 @@ final class SyncEngine {
                 serverEntryOrNil = nil
             }
             if let serverEntry = serverEntryOrNil,
+               let serverHash = serverEntry.hash, !serverHash.isEmpty,
+               let deviceHash = vm.deviceClipboard?.hash, !deviceHash.isEmpty,
+               hashesEqual(serverHash, deviceHash) {
+                // Truth gate: server latest and device clipboard hold
+                // identical content — already converged, no matter what the
+                // watermark says. Extensions write the shared watermark too
+                // (keyboard / share / intents), and a desynced watermark
+                // must not make us re-pull content the device already has
+                // (clobbering a fresh local copy) or re-push content the
+                // server already has. Repair the watermark and move on.
+                advanceSynced(to: serverHash)
+                lastAppliedContentHash = serverHash.uppercased()
+                stagedServerHash = nil
+                stagedEntry = nil
+                state = .succeeded
+                lastSyncedAt = .now
+                lastError = nil
+            } else if let serverEntry = serverEntryOrNil,
                !hashesEqual(serverEntry.hash, lastSyncedContentHash) {
                 try await processServerNew(serverEntry, client: client, vm: vm)
             } else {
@@ -453,6 +496,7 @@ final class SyncEngine {
                 log.info("tick: recovered after \(self.consecutiveFailures, privacy: .public) failures, state=\(String(describing: self.state), privacy: .public)")
             }
             consecutiveFailures = 0
+            nextNetworkAttemptAt = nil
         } catch let e as SyncError where e.kind == .authFailed {
             log.error("tick: auth failed, stopping loop")
             state = .authFailed
@@ -460,11 +504,13 @@ final class SyncEngine {
             stop()
         } catch let e as SyncError {
             consecutiveFailures += 1
+            nextNetworkAttemptAt = Date().addingTimeInterval(currentBackoffSeconds())
             log.error("tick: SyncError kind=\(String(describing: e.kind), privacy: .public) consecutiveFailures=\(self.consecutiveFailures, privacy: .public) underlying=\(e.underlying ?? "nil", privacy: .public)")
             state = .offlineRetrying
             lastError = e
         } catch {
             consecutiveFailures += 1
+            nextNetworkAttemptAt = Date().addingTimeInterval(currentBackoffSeconds())
             log.error("tick: unexpected error consecutiveFailures=\(self.consecutiveFailures, privacy: .public): \(String(describing: error), privacy: .public)")
             state = .offlineRetrying
             lastError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
@@ -646,7 +692,10 @@ final class SyncEngine {
         guard let vm = viewModel else { return }
 
         let entry = snapshot.clipboard
-        // Always record locally first, regardless of server availability.
+        // Always record locally first, regardless of server availability —
+        // seeding the byte caches before the append so the card's
+        // thumbnail finds them the moment it renders.
+        vm.seedLocalPayloadCache(from: snapshot)
         vm.appendHistory(entry: entry, direction: .local)
         vm.adoptConsentPush(entry)
 

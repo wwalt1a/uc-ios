@@ -95,6 +95,10 @@ final class KeyboardModel {
     private(set) var lastError: String?
     private(set) var cards: [Card] = []
     private(set) var pushStatus: PushStatus = .none
+    /// The entry the most recent uplink actually uploaded. Read by the
+    /// downlink half to decide whether the server's latest is our own push
+    /// (→ adopt its hash as watermark) or someone else's (→ treat as pull).
+    private var lastPushedEntry: Clipboard?
     /// Brief success/failure badge on the refresh button; auto-clears.
     private(set) var syncFlash: SyncFlash?
     private(set) var serverLabel: String = ""
@@ -412,13 +416,20 @@ final class KeyboardModel {
             let latest = try await client.getClipboard()
             guard gen == syncGeneration else { return }
 
-            if didPush {
-                // We just pushed — the server's latest IS our content. The
+            if didPush, let pushed = lastPushedEntry, Self.isSameContent(latest, pushed) {
+                // The server's latest IS the entry we just pushed. The
                 // server may compute a different profile hash for images
                 // (it derives a different filename component), so we adopt
                 // the server's hash as our watermark. This prevents both
                 // this keyboard and the main app from re-pulling the same
                 // content as a "new" entry.
+                //
+                // `isSameContent` gates the adoption: if another device
+                // pushed between our PUT and this GET, blindly adopting the
+                // returned hash would mark content we've NEVER seen as
+                // "already synced" — swallowing it for the whole suite (the
+                // main app would skip it: server hash == watermark) AND
+                // letting the next push overwrite it on the server.
                 if let serverHash = latest.hash, !serverHash.isEmpty {
                     log.info("sync post-push: adopting server hash \(serverHash.prefix(16))… (was \(self.store.loadLastSyncedHash()?.prefix(16) ?? "nil"))")
                     store.saveLastSyncedHash(serverHash)
@@ -426,13 +437,16 @@ final class KeyboardModel {
                 lastError = nil
                 flashSync(.success)
             } else {
+                // Normal pull — including the "we pushed but another device
+                // pushed right after" race, where `latest` is genuinely new
+                // remote content that must surface, not be adopted.
                 let historyHeadHash = store.loadHistory().first?.entry.hash
                 log.info("sync pull: serverHash=\(latest.hash ?? "nil") serverType=\(latest.type.rawValue) historyHeadHash=\(historyHeadHash ?? "nil") lastSyncedHash=\(self.store.loadLastSyncedHash() ?? "nil")")
                 let pulledNew = appendPulledIfNew(latest)
                 log.info("sync pull result: pulledNew=\(pulledNew)")
                 reloadCards()
                 lastError = nil
-                if force || pulledNew { flashSync(.success) }
+                if force || didPush || pulledNew { flashSync(.success) }
             }
         } catch {
             guard gen == syncGeneration else { return }
@@ -482,11 +496,29 @@ final class KeyboardModel {
             store.saveLastSyncedChangeCount(cc)
             store.appendHistory(entry: snap.clipboard, direction: .pushed)
             pushStatus = .pushed(Self.summary(for: snap.clipboard))
+            lastPushedEntry = snap.clipboard
             log.info("push: success")
         } catch {
             store.saveLastSyncedChangeCount(cc)
             pushStatus = .failed(Self.message(for: error))
             log.error("push: FAILED \(error)")
+        }
+    }
+
+    /// Whether the server's `latest` is plausibly the entry we just pushed.
+    /// Hash equality is conclusive; for images the server may rewrite the
+    /// hash AND the filename (it derives its own name component), so fall
+    /// back to type + size. Text compares the inline text itself.
+    private static func isSameContent(_ server: Clipboard, _ pushed: Clipboard) -> Bool {
+        guard server.type == pushed.type else { return false }
+        if let sh = server.hash, let ph = pushed.hash,
+           !sh.isEmpty, sh.uppercased() == ph.uppercased() {
+            return true
+        }
+        switch server.type {
+        case .text:          return server.text == pushed.text
+        case .image, .file:  return server.size == pushed.size
+        case .group:         return false
         }
     }
 
@@ -574,10 +606,19 @@ final class KeyboardModel {
     /// Act on a tapped card: insert text inline, or fetch + copy an image to
     /// the system pasteboard (a text field can't host an image inline).
     /// Long text / images fetch their payload here, on the tap, not during
-    /// the auto-sync pass. Copying an image advances the pasteboard
-    /// `changeCount`, so we stamp the watermark to its hash — otherwise the
-    /// *next* keyboard open would read that image back off the pasteboard and
-    /// re-push it.
+    /// the auto-sync pass.
+    ///
+    /// Copying an image advances the pasteboard `changeCount`, and the
+    /// follow-up `refresh()` pushes it to the server through the normal
+    /// uplink — same "copy = sync" semantics as tapping a card in the main
+    /// app. The watermark advances through the push path, so the shared
+    /// `lastSyncedHash` invariant ("server latest == device == this hash")
+    /// holds. The previous behavior wrote `saveLastSyncedHash` directly
+    /// WITHOUT pushing, which left the shared watermark pointing at content
+    /// the server never had as its latest — the main app's next tick would
+    /// then mistake the server's unchanged latest for new remote content,
+    /// re-pull it as a duplicate, and overwrite whatever the user had
+    /// copied in the meantime.
     func activate(_ card: Card) {
         guard actingCardID == nil else { return }
         keyFeedback()
@@ -603,9 +644,16 @@ final class KeyboardModel {
             fetchThen(card: card, name: name) { [weak self] data in
                 guard let self, !data.isEmpty else { return }
                 UIPasteboard.general.setData(data, forPasteboardType: PasteboardReader.uti(forExt: ext))
-                let (clip, _) = Clipboard.publishImage(bytes: data, ext: ext)
-                if let hash = clip.hash { self.store.saveLastSyncedHash(hash) }
+                // Cache the bytes under the hash the upcoming push will
+                // compute, so the app's preview finds them offline.
+                self.store.saveImageData(hash: Clipboard.computeBytesHash(data), data: data)
+                // Surface the copied card at the head (the uplink's
+                // "already at head" dedup then recognizes it), and push
+                // through the normal sync pass. Reading back our own
+                // just-written pasteboard never prompts.
+                self.store.touchHistoryItem(id: card.id)
                 self.flashActed(card.id)
+                self.refresh()
             }
         }
     }

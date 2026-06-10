@@ -301,20 +301,16 @@ public final class SettingsStore: @unchecked Sendable {
         cap: Int = 200
     ) {
         var items = loadHistory()
+        // Same content already at the head → never insert a duplicate row,
+        // regardless of direction. Upgrade `.local` provenance to
+        // pushed/pulled in place; keep the stronger direction otherwise.
         if let hash = entry.hash,
            let last = items.first,
-           last.direction == direction,
            last.entry.hash == hash {
-            return
-        }
-        // Upgrade .local → .pushed/.pulled in place instead of duplicating.
-        if let hash = entry.hash,
-           let last = items.first,
-           last.entry.hash == hash,
-           last.direction == .local,
-           direction != .local {
-            items[0].direction = direction
-            saveHistory(items)
+            if direction != .local, last.direction != direction {
+                items[0].direction = direction
+                saveHistory(items)
+            }
             return
         }
         items.insert(
@@ -322,6 +318,19 @@ public final class SettingsStore: @unchecked Sendable {
             at: 0
         )
         if items.count > cap { items = Array(items.prefix(cap)) }
+        saveHistory(items)
+    }
+
+    /// Move the history item with `id` to the head of the log by stamping
+    /// its timestamp to now. Used by keyboard tap-to-copy so the row
+    /// surfaces first (matching the main app's reapply semantics) and the
+    /// uplink's "already at head?" dedup recognizes the copied entry.
+    public func touchHistoryItem(id: UUID) {
+        var items = loadHistory()
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        var item = items.remove(at: idx)
+        item.timestamp = Date()
+        items.insert(item, at: 0)
         saveHistory(items)
     }
 

@@ -865,6 +865,41 @@ final class AppViewModel {
         }
     }
 
+    /// Capture the device pasteboard's payload bytes into the local caches
+    /// the moment a new locally-copied image is observed. The observer's
+    /// `read()` deliberately drops payload bytes (its `current` is
+    /// long-lived observable state), so this re-snapshots once per new
+    /// image. Cheap: fires only on the tick that first sees a new hash,
+    /// and re-reading content this process was already granted never
+    /// re-prompts. The hash check guards the race where the pasteboard
+    /// changed between the observer's read and this snapshot.
+    ///
+    /// This is what makes a local screenshot render its card cover
+    /// instantly — the thumbnail loader must never need the network (or
+    /// the upload to have happened) for content this device produced.
+    func seedLocalPayloadCache(for entry: Clipboard) {
+        guard entry.type == .image, entry.hasData,
+              let hash = entry.hash, !hash.isEmpty,
+              store.loadImageData(hash: hash) == nil,
+              let snapshot = pasteboard.snapshot(),
+              snapshot.clipboard.hash?.uppercased() == hash.uppercased()
+        else { return }
+        seedLocalPayloadCache(from: snapshot)
+    }
+
+    /// Snapshot-based variant for callers that already hold the bytes
+    /// (consent push, where the system paste control handed them over).
+    func seedLocalPayloadCache(from snapshot: DeviceClipboardSnapshot) {
+        let entry = snapshot.clipboard
+        guard entry.type == .image,
+              let hash = entry.hash, !hash.isEmpty,
+              let payload = snapshot.payload
+        else { return }
+        store.saveImageData(hash: hash, data: payload)
+        let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
+        Task { try? await PayloadCache.shared.write(profileId: profileId, bytes: payload) }
+    }
+
     /// Fire-and-forget cache prefetch for an incoming server entry.
     /// No-op when prefetch is disabled, the path is cellular and the
     /// user hasn't opted in, or the entry isn't a hash-tracked
@@ -1038,14 +1073,22 @@ extension AppViewModel {
         defer { isPushing = false }
         let trustInsecure = appSettings.trustInsecureCert
         let entry = snapshot.clipboard
+        // Seed the local caches from the in-hand bytes BEFORE the network
+        // round-trip: the history card for this entry already exists (the
+        // tick's local-append / consentPush ran first), and its thumbnail
+        // loader must not have to race the PUT — let alone re-download from
+        // the server what this device just produced.
+        if let payload = snapshot.payload, let hash = entry.hash, !hash.isEmpty {
+            if entry.type == .image {
+                store.saveImageData(hash: hash, data: payload)
+            }
+            let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
+            try? await PayloadCache.shared.write(profileId: profileId, bytes: payload)
+        }
         do {
             let client = try SyncClipboardClient(server: server, trustInsecureCert: trustInsecure)
             if let payload = snapshot.payload, let dataName = entry.dataName {
                 try await client.putFile(name: dataName, body: payload)
-                if let hash = entry.hash, !hash.isEmpty {
-                    let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
-                    try? await PayloadCache.shared.write(profileId: profileId, bytes: payload)
-                }
             }
             try await client.putClipboard(entry)
             serverLatest = entry
