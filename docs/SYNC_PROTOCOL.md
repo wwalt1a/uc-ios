@@ -507,18 +507,21 @@ computeTextHash(text: string) -> string:
 
 ### 4.2 File / image hash
 
-The hash binds **both** the filename basename and the bytes, so renaming a file
-without changing its content produces a different hash:
+Raw SHA-256 over the payload bytes — the same algorithm as §4.1, applied to
+the file's bytes instead of UTF-8 text. The filename does **not** participate;
+renaming a file without changing its content keeps the same hash:
 
 ```
-computeFileHash(filename: string, bytes: bytes) -> string:
-    contentHash = SHA256(bytes).hex.upper
-    combined    = basename(filename) + "|" + contentHash
-    return SHA256(utf8(combined)).hex.upper
+computeFileHash(bytes: bytes) -> string:
+    return SHA256(bytes).hex.upper
 ```
 
-`basename(filename)` MUST strip any path components and keep the final segment,
-extension included.
+> Historical note: an earlier revision of this spec described a
+> basename-bound two-step hash (`SHA256(basename + "|" + SHA256(bytes))`).
+> That never matched what SyncClipboard servers actually compute — real
+> servers hash raw bytes — and interop testing surfaced the mismatch as
+> spurious §4.4 verification failures. Per this spec's own rule, the spec
+> was corrected to match reality.
 
 ### 4.3 Group (ZIP) hash
 

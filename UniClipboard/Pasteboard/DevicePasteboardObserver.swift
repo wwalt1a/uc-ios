@@ -257,32 +257,24 @@ final class DevicePasteboardObserver {
     /// pasteboard so they can be pasted into another app).
     ///
     /// `originalName`, when non-nil, is the dataName from the server entry
-    /// being applied. We adopt it directly so the observer's `current`
-    /// carries the same §4.2 basename binding as the server, and the
-    /// connector reads "synced" instead of falsely reporting mismatch.
+    /// being applied; it's adopted for display (`text`/`dataName`) only.
+    /// The hash is raw-bytes SHA-256 — basename does not participate, so
+    /// the adopted hash, a later re-snapshot's hash, and the server's hash
+    /// all agree regardless of how UIPasteboard canonicalizes the name.
     /// In live mode we ALSO call `setData` and capture `changeCount`; the
     /// echo notification that fires next is ignored by `read()` because
-    /// changeCount matches. UIPasteboard discards basename, so without
-    /// these two layers a live re-read would canonicalize to `image.<ext>`
-    /// and falsely flag `§4.2` mismatch.
+    /// changeCount matches.
     func write(data: Data, uti: String, originalName: String? = nil) {
         let name = originalName ?? "image.\(Self.ext(forUTI: uti))"
+        let hash = Clipboard.computeBytesHash(data)
         let adopted = Clipboard(
             type: .image,
-            hash: Clipboard.computeFileHash(name: name, bytes: data),
+            hash: hash,
             text: name,
             hasData: true,
             dataName: name,
             size: data.count
         )
-        // Also stash the canonical-basename hash that `liveSnapshot` would
-        // compute when re-reading. UIPasteboard discards basename, so the
-        // re-snap always lands on `image.<ext>` — that hash is the one
-        // the echo guard needs to compare against. If they're already
-        // equal (originalName already in canonical form, or text path),
-        // this is the same as adopted.hash.
-        let canonicalBasename = "image.\(Self.ext(forUTI: uti))"
-        let canonicalHash = Clipboard.computeFileHash(name: canonicalBasename, bytes: data)
         switch envMode {
         case .live:
             UIPasteboard.general.setData(data, forPasteboardType: uti)
@@ -291,7 +283,7 @@ final class DevicePasteboardObserver {
         case .forceNil, .forceText, .forceImage:
             break
         }
-        lastWrittenContentHash = canonicalHash.uppercased()
+        lastWrittenContentHash = hash.uppercased()
         current = adopted
         detection = nil
     }
@@ -466,7 +458,7 @@ struct PasteboardDetection: Equatable {
 
 /// Built-in image fixtures keyed by a short name. Same `red8x8` PNG the
 /// simctl stub serves so device-side `publishImage` and stub-side
-/// `computeFileHash` produce identical §4.2 hashes — cross-recipe
+/// `_bytes_hash` produce identical §4.2 hashes — cross-recipe
 /// consistency without copy-paste.
 private enum ImageFixtures {
     static let red8x8PNG = Data(base64Encoded:

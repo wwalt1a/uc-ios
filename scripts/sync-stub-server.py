@@ -89,15 +89,8 @@ def _iso(delta_seconds: float = 0.0) -> str:
     return when.strftime("%Y-%m-%dT%H:%M:%S.") + f"{when.microsecond // 1000:03d}Z"
 
 
-def _file_hash(name: str, body: bytes) -> str:
-    """§4.2 — SHA256(basename + '|' + SHA256(bytes).hex.upper).hex.upper."""
-    content = hashlib.sha256(body).hexdigest().upper()
-    combined = f"{name}|{content}".encode("utf-8")
-    return hashlib.sha256(combined).hexdigest().upper()
-
-
 def _bytes_hash(body: bytes) -> str:
-    """§4.1 — uppercase hex SHA-256 over the raw bytes."""
+    """§4.1/§4.2 — uppercase hex SHA-256 over the raw bytes (all types)."""
     return hashlib.sha256(body).hexdigest().upper()
 
 
@@ -432,7 +425,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     kind = "Image"
             with STATE.lock:
                 STATE.files[payload_name] = payload_bytes
-            hash_ = _file_hash(payload_name, payload_bytes)
+            hash_ = _bytes_hash(payload_bytes)
             entry_meta = {
                 "type": kind,
                 "hash": hash_,

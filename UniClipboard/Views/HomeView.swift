@@ -483,7 +483,7 @@ struct HomeView: View {
     private func handleTapToCopy(_ item: ClipboardHistoryItem) {
         switch item.entry.displayKind {
         case .text, .url:
-            vm.reapplyText(item.entry.text)
+            vm.reapplyHistoryItem(item)
             withAnimation(.snappy) {
                 pinnedItemId = item.id
             }
@@ -498,19 +498,21 @@ struct HomeView: View {
             Task {
                 await vm.applyAttachment(for: item)
                 loadingItemIds.remove(item.id)
+                guard vm.applyError == nil else { return }
+                vm.reapplyHistoryItem(item)
                 withAnimation(.snappy) {
                     pinnedItemId = item.id
                 }
                 let generator = UIImpactFeedbackGenerator(style: .light)
                 generator.impactOccurred()
                 schedulePinReset()
-                if vm.applyError == nil {
-                    await vm.pushHistoryEntryToServer(item)
-                }
+                await vm.pushHistoryEntryToServer(item)
             }
 
         case .file, .group:
-            UIPasteboard.general.string = item.entry.dataName ?? item.entry.text
+            // reapplyHistoryItem copies the filename as text through the
+            // observer (adopted write) — no raw UIPasteboard write here.
+            vm.reapplyHistoryItem(item)
             withAnimation(.snappy) {
                 pinnedItemId = item.id
             }
@@ -524,19 +526,19 @@ struct HomeView: View {
     private func handleCopyFromOverlay(_ item: ClipboardHistoryItem) {
         switch item.entry.displayKind {
         case .text, .url:
-            vm.reapplyText(item.entry.text)
+            vm.reapplyHistoryItem(item)
             Task { await vm.pushHistoryEntryToServer(item) }
         case .image:
             if item.entry.hasData {
                 Task {
                     await vm.applyAttachment(for: item)
-                    if vm.applyError == nil {
-                        await vm.pushHistoryEntryToServer(item)
-                    }
+                    guard vm.applyError == nil else { return }
+                    vm.reapplyHistoryItem(item)
+                    await vm.pushHistoryEntryToServer(item)
                 }
             }
         case .file, .group:
-            UIPasteboard.general.string = item.entry.dataName ?? item.entry.text
+            vm.reapplyHistoryItem(item)
             Task { await vm.pushHistoryEntryToServer(item) }
         }
     }

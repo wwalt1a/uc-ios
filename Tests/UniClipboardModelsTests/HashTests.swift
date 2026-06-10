@@ -91,50 +91,38 @@ final class HashTests: XCTestCase {
         }
     }
 
-    // MARK: - computeFileHash (§4.2) + publishImage
+    // MARK: - File/image hash (§4.2) + publishImage
 
     /// 8×8 red-square PNG, ~70 bytes. Same fixture the simctl stub uses,
     /// so cross-recipe consistency is locked in: the device's local
     /// `publishImage` of these bytes produces the same §4.2 hash as the
-    /// stub server's `computeFileHash(name:bytes:)` of the served file.
+    /// stub server's `_bytes_hash` of the served file.
     private static let red8x8PNG = Data(base64Encoded:
         "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABGdBTUEAALGP" +
         "C/xhBQAAAAFzUkdCAK7OHOkAAAAGUExURf8AAP///8jJRKEAAAAOSURBVAjX" +
         "Y/jPwMDAAAAEAQEAQYxqNwAAAABJRU5ErkJggg=="
     )!
 
-    func test_F1_computeFileHash_redPNG_matchesSpecAlgorithm() {
-        // Recompose the §4.2 expected value from the spec recipe — if the
-        // function ever drifted to plain SHA256(bytes) (cycle 6's bug), this
-        // would fail.
+    func test_F1_fileHash_isRawBytesSHA256_nameDoesNotParticipate() {
+        // §4.2 — the file/image hash is plain SHA256(bytes). If publish
+        // ever drifts back to the basename-bound two-step (pre-unification
+        // bug), the published hash stops matching computeBytesHash and
+        // this fails.
         let bytes = Self.red8x8PNG
-        let contentHash = Clipboard.computeBytesHash(bytes)
-        let combined = "image.png|\(contentHash)"
-        let expected = Clipboard.computeBytesHash(Data(combined.utf8))
+        let (asImage, _) = Clipboard.publishImage(bytes: bytes, ext: "png")
+        let (asFile, _) = Clipboard.publishFile(name: "anything.png", bytes: bytes)
+        XCTAssertEqual(asImage.hash, Clipboard.computeBytesHash(bytes))
+        XCTAssertEqual(asFile.hash, Clipboard.computeBytesHash(bytes))
         XCTAssertEqual(
-            Clipboard.computeFileHash(name: "image.png", bytes: bytes),
-            expected
+            asImage.hash, asFile.hash,
+            "filename must NOT bind into the hash — same bytes, same hash"
         )
     }
 
-    func test_F2_computeFileHash_sameBytes_differentName_differentHash() {
-        let bytes = Self.red8x8PNG
-        let h1 = Clipboard.computeFileHash(name: "image.png", bytes: bytes)
-        let h2 = Clipboard.computeFileHash(name: "other.png", bytes: bytes)
-        XCTAssertNotEqual(h1, h2, "basename must bind into the §4.2 hash")
-    }
-
-    func test_F3_computeFileHash_sameName_differentBytes_differentHash() {
-        let h1 = Clipboard.computeFileHash(name: "image.png", bytes: Self.red8x8PNG)
-        let h2 = Clipboard.computeFileHash(name: "image.png", bytes: Data([0xFF, 0xD8, 0xFF])) // not red8x8
-        XCTAssertNotEqual(h1, h2, "content bytes must bind into the §4.2 hash")
-    }
-
-    func test_F4_computeFileHash_pathComponents_strippedToBasename() {
-        let bytes = Self.red8x8PNG
-        let h1 = Clipboard.computeFileHash(name: "a/b/c.png", bytes: bytes)
-        let h2 = Clipboard.computeFileHash(name: "c.png", bytes: bytes)
-        XCTAssertEqual(h1, h2, "path prefix must be stripped — only basename matters")
+    func test_F3_fileHash_differentBytes_differentHash() {
+        let h1 = Clipboard.computeBytesHash(Self.red8x8PNG)
+        let h2 = Clipboard.computeBytesHash(Data([0xFF, 0xD8, 0xFF])) // not red8x8
+        XCTAssertNotEqual(h1, h2)
     }
 
     func test_F5_publishImage_producesCorrectShape() {
@@ -145,7 +133,7 @@ final class HashTests: XCTestCase {
         XCTAssertEqual(clip.dataName, "image.png")
         XCTAssertEqual(clip.text, "image.png", "non-text text-field must be the basename per §3.3")
         XCTAssertEqual(clip.size, bytes.count)
-        XCTAssertEqual(clip.hash, Clipboard.computeFileHash(name: "image.png", bytes: bytes))
+        XCTAssertEqual(clip.hash, Clipboard.computeBytesHash(bytes))
     }
 
     /// Bytes-preservation discipline. `publishImage` must NOT re-encode

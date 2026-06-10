@@ -115,21 +115,11 @@ struct ReceiveClipboardIntent: AppIntent {
         }
     }
 
-    /// §4.4 verify, branching on the entry's type (§4.1 raw SHA-256 vs §4.2
-    /// basename-bound). Mirrors `AppViewModel.verify(bytes:against:)`.
+    /// §4.4 verify: SHA-256 over raw bytes for all types. Mirrors
+    /// `AppViewModel.verify(bytes:against:)`.
     private static func verify(bytes: Data, against entry: Clipboard) throws {
-        let actual: String
-        switch entry.type {
-        case .text:
-            actual = Clipboard.computeBytesHash(bytes)
-        case .image, .file:
-            guard let name = entry.dataName else {
-                throw SyncError(kind: .hashMismatch, underlying: "missing dataName for \(entry.type)")
-            }
-            actual = Clipboard.computeFileHash(name: name, bytes: bytes)
-        case .group:
-            return
-        }
+        if entry.type == .group { return }
+        let actual = Clipboard.computeBytesHash(bytes)
         guard Clipboard.hashMatches(expected: entry.hash, actual: actual) else {
             throw SyncError(
                 kind: .hashMismatch,

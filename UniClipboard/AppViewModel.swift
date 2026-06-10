@@ -375,18 +375,48 @@ final class AppViewModel {
     /// clipboard and clear the push hint.
     func adoptConsentPush(_ entry: Clipboard) { pasteboard.adoptConsentPush(entry) }
 
-    /// Re-copy a historical text entry back onto the device pasteboard.
-    /// Non-text entries are no-ops at this layer — the row UI suppresses
-    /// the action for those types.
-    func reapplyText(_ text: String) {
-        pasteboard.write(text: text)
+    /// Re-apply a history item: move it to the top of history, write to
+    /// the device pasteboard (text / filename — image bytes are written by
+    /// `applyAttachment` before this is called), and record the written
+    /// hash with the engine so the next tick neither re-pushes the
+    /// self-written content nor logs it as a new `.local` entry.
+    ///
+    /// `lastSyncedContentHash` is NOT advanced here — that happens in
+    /// `pushHistoryEntryToServer` once the PUT actually lands, keeping the
+    /// engine's view of the server truthful while the push is in flight
+    /// (or if it fails).
+    func reapplyHistoryItem(_ item: ClipboardHistoryItem) {
+        moveHistoryItemToTop(item)
+        switch item.entry.type {
+        case .text:
+            pasteboard.write(text: item.entry.text)
+            // For §3.4 overflow entries `text` is the truncated inline
+            // part, so hash what we actually wrote, not `entry.hash`.
+            engine.noteReapplyWritten(
+                deviceHash: Clipboard.publishText(item.entry.text).clipboard.hash
+            )
+        case .image:
+            // Bytes already adopted by the observer via applyAttachment;
+            // verify guarantees they hash to `entry.hash`.
+            engine.noteReapplyWritten(deviceHash: item.entry.hash)
+        case .file, .group:
+            // UIPasteboard can't carry an arbitrary file — copy the
+            // filename as text, through the observer so the write is
+            // adopted (a raw `UIPasteboard.general.string =` write would
+            // be picked up by the next tick as brand-new local content
+            // and pushed, overwriting the file entry on the server).
+            let name = item.entry.dataName ?? item.entry.text
+            pasteboard.write(text: name)
+            engine.noteReapplyWritten(
+                deviceHash: Clipboard.publishText(name).clipboard.hash
+            )
+        }
     }
 
-    /// Push a history entry to the server as the new "latest" so the next
-    /// sync tick sees matching hashes and doesn't overwrite the user's
-    /// selection. For entries with payload data (images/files), bytes are
-    /// fetched from the local cache or the history API (§2.11) and
-    /// re-uploaded via §3.5. Text-only entries need only the metadata PUT.
+    /// Push a history entry to the server as the new "latest" so other
+    /// devices see the re-applied content. For entries with payload data
+    /// (images/files), bytes are fetched from the local cache or the
+    /// history API (§2.11) and re-uploaded via §3.5.
     func pushHistoryEntryToServer(_ item: ClipboardHistoryItem) async {
         let entry = item.entry
         guard let server = activeServer else { return }
@@ -401,8 +431,13 @@ final class AppViewModel {
 
             if entry.hasData, let dataName = entry.dataName,
                let hash = entry.hash, !hash.isEmpty {
-                let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
-                let bytes = try await Self.fetchHistory(client: client, profileId: profileId)
+                let bytes: Data
+                if let cached = store.loadImageData(hash: hash) {
+                    bytes = cached
+                } else {
+                    let profileId = HistoryRecord.profileId(type: entry.type, hash: hash)
+                    bytes = try await Self.fetchHistory(client: client, profileId: profileId)
+                }
                 try await client.putFile(name: dataName, body: bytes)
             }
 
@@ -413,6 +448,14 @@ final class AppViewModel {
         }
 
         engine.advanceSyncedForReapply(to: entry.hash)
+    }
+
+    private func moveHistoryItemToTop(_ item: ClipboardHistoryItem) {
+        if let idx = history.firstIndex(where: { $0.id == item.id }) {
+            var moved = history.remove(at: idx)
+            moved.timestamp = .now
+            history.insert(moved, at: 0)
+        }
     }
 
     /// Remove one row from the in-memory `history` list. Operates on the
@@ -436,20 +479,17 @@ final class AppViewModel {
     /// publisher chose not to fingerprint, and we have nothing to dedup
     /// against.
     func appendHistory(entry: Clipboard, direction: ClipboardHistoryItem.Direction, at timestamp: Date = .now) {
+        // Same content already at the top → never insert a duplicate row,
+        // regardless of direction. Upgrade `.local` provenance to
+        // pushed/pulled in place; keep the stronger direction otherwise
+        // (a re-observation of content we already attributed shouldn't
+        // downgrade it back to `.local`).
         if let hash = entry.hash,
            let last = history.first,
-           last.direction == direction,
            last.entry.hash == hash {
-            return
-        }
-        // Dedup: if the newest entry has the same hash but direction is
-        // .local and we're upgrading to .pushed/.pulled, update in place.
-        if let hash = entry.hash,
-           let last = history.first,
-           last.entry.hash == hash,
-           last.direction == .local,
-           direction != .local {
-            history[0].direction = direction
+            if direction != .local, last.direction != direction {
+                history[0].direction = direction
+            }
             return
         }
         history.insert(

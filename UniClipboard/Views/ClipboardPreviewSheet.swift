@@ -505,12 +505,17 @@ struct ClipboardPreviewSheet: View {
 
     private func copy() async {
         if item.entry.type == .text {
-            vm.reapplyText(item.entry.text)
+            vm.reapplyHistoryItem(item)
+            Task { await vm.pushHistoryEntryToServer(item) }
             dismiss()
             return
         }
         await vm.applyAttachment(for: item)
-        if vm.applyError == nil { dismiss() }
+        if vm.applyError == nil {
+            vm.reapplyHistoryItem(item)
+            Task { await vm.pushHistoryEntryToServer(item) }
+            dismiss()
+        }
     }
 
     private func save() async {

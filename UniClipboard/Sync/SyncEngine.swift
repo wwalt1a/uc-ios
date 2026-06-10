@@ -378,9 +378,12 @@ final class SyncEngine {
         if vm.appSettings.autoPushDeviceChanges {
             vm.pollPasteboardIfChanged()
             // Auto-push ON: record any new device clipboard content locally,
-            // regardless of whether a server is configured.
+            // regardless of whether a server is configured. Skip content we
+            // wrote to the pasteboard ourselves (apply / reapply) — it's
+            // already in history under its original provenance.
             if let device = vm.deviceClipboard,
                let hash = device.hash?.uppercased(),
+               hash != lastAppliedContentHash,
                !isHashInRecentHistory(vm: vm, hash: hash) {
                 vm.appendHistory(entry: device, direction: .local)
             }
@@ -585,15 +588,13 @@ final class SyncEngine {
             return
         }
         if hashesEqual(device.hash, lastAppliedContentHash) {
-            // Defense (B): the freshly-applied entry IS what's on the
-            // pasteboard right now — but observer.current's hash might
-            // disagree with `lastSyncedContentHash` because of basename
-            // canonicalization (e.g., server's dataName="photo.heif" got
-            // re-snapshotted as the priority-list canonical "image.heic",
-            // changing the §4.2 basename-bound hash). Treat this as
-            // already synced and DON'T push the device version back; doing
-            // so would echo the server's content back to the server under
-            // a different basename and start the apply↔push pong.
+            // Defense (B): what's on the pasteboard is content WE wrote —
+            // an applied server entry, or a re-applied history item whose
+            // pasteboard form hashes differently from the entry it came
+            // from (§3.4 overflow preview, file/group filename-as-text).
+            // Treat it as already synced and DON'T push it back; doing so
+            // would overwrite the server's entry with the device-side
+            // rendering and start the apply↔push pong.
             state = .succeeded
             lastSyncedAt = .now
             lastError = nil
@@ -676,6 +677,20 @@ final class SyncEngine {
             state = .offlineRetrying
             lastError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
         }
+    }
+
+    /// Called when the UI re-applies a history entry onto the device
+    /// pasteboard, BEFORE the corresponding server push completes.
+    /// Records the hash of what was actually written so the tick neither
+    /// re-pushes the self-written content nor logs it as a new `.local`
+    /// copy. Deliberately does NOT advance `lastSyncedContentHash` — the
+    /// server still holds the previous content until the PUT lands, and
+    /// advancing early would make the next tick mistake the server's
+    /// unchanged latest for new remote content (re-pulling and reverting
+    /// the user's selection).
+    func noteReapplyWritten(deviceHash: String?) {
+        guard let deviceHash, !deviceHash.isEmpty else { return }
+        lastAppliedContentHash = deviceHash.uppercased()
     }
 
     /// Called after a successful server push of a re-applied history entry.
