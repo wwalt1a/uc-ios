@@ -39,7 +39,7 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            Section("同步") {
+            Section {
                 NavigationLink(value: SettingsRoute.servers) {
                     HStack {
                         Label("服务器列表", systemImage: "server.rack")
@@ -52,6 +52,11 @@ struct SettingsView: View {
                 Toggle(isOn: $vm.appSettings.trustInsecureCert) {
                     Label("允许不安全证书", systemImage: "lock.open")
                 }
+            } header: {
+                Text("同步")
+            } footer: {
+                Text("「允许不安全证书」仅在服务器使用自签名 HTTPS 证书时需要，纯 HTTP 无需开启。")
+                    .font(.caption)
             }
 
             Section {

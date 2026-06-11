@@ -4251,16 +4251,6 @@
         }
       }
     },
-    "同一服务器可填多个地址（局域网 / Tailscale / 公网），App 会按当前网络自动选用可达的一条；第一条为默认地址。左滑删除。局域网或自签名证书时勾选「允许不安全证书」，此设置全局生效。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "One server can have several addresses (LAN / Tailscale / Internet); the app automatically uses whichever is reachable on the current network, with the first entry as the default. Swipe left to delete. Enable “Allow Insecure Certificates” for LAN or self-signed servers — the setting applies globally."
-          }
-        }
-      }
-    },
     "请填写地址、用户名和密码" : {
       "localizations" : {
         "en" : {
@@ -4317,6 +4307,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Swipe left to make a server current or delete it. Each server can have several addresses (LAN / Tailscale / Internet), picked automatically for the current network."
+          }
+        }
+      }
+    },
+    "同一服务器可填多个地址（局域网 / Tailscale / 公网），App 会按当前网络自动选用可达的一条；第一条为默认地址。左滑删除。「允许不安全证书」仅在使用自签名 HTTPS 证书时需要，纯 HTTP 无需开启；此设置全局生效。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One server can have several addresses (LAN / Tailscale / Internet); the app automatically uses whichever is reachable on the current network, with the first entry as the default. Swipe left to delete. “Allow Insecure Certificates” is only needed for self-signed HTTPS certificates — plain HTTP doesn’t need it; the setting applies globally."
+          }
+        }
+      }
+    },
+    "「允许不安全证书」仅在服务器使用自签名 HTTPS 证书时需要，纯 HTTP 无需开启。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Allow Insecure Certificates” is only needed when the server uses a self-signed HTTPS certificate — plain HTTP doesn’t need it."
           }
         }
       }
