@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0 (10) — 2026-06-11
+
+### New Features
+
+- **Multi-URL per-server auto-switch** — a server profile now holds an ordered
+  list of candidate URLs (LAN / Tailscale / WAN, auto-classified by host shape)
+  and the app probes reachability to pick the best endpoint automatically on
+  profile switch, network change, foreground, and sync failure. Replaces the
+  old per-server Wi-Fi/cellular/Tailscale trigger strategy.
+- **Multi-URL editor** with address-class chips and a probe-all 测试连接 that
+  shows per-URL ✓/✗ plus a 将使用 badge for the endpoint that will be used.
+- **QR pairing carries the full URL list**, so scanning a connect code imports
+  every candidate address in one step.
+
+### Bug Fixes
+
+- Home clipboard cards now render as true 1:1 squares on every device and
+  orientation instead of a fixed height.
+- Top-bar capsule labels (选择 / 全选 / 完成) stay on a single line when the
+  error badge crowds the bar, instead of wrapping vertically.
+- Clarified the "trust insecure certificate" setting copy — it applies to
+  self-signed HTTPS only; plain HTTP is unaffected.
+
 ## 1.0 (9) — 2026-06-10
 
 ### New Features
