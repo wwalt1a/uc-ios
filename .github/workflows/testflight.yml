@@ -146,13 +146,13 @@ jobs:
       # Automatic signing at export makes xcodebuild attempt cloud signing,
       # which needs an Admin-role API key ("Cloud signing permission error"
       # with App Manager). Instead we export with manual signing against
-      # pre-created App Store profiles (scripts/asc_profiles.rb create) that
+      # pre-created App Store profiles (Scripts/asc_profiles.rb create) that
       # this step downloads and installs.
       - name: Install App Store provisioning profiles
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-        run: ruby scripts/asc_profiles.rb install "$ASC_API_KEY_ID" "$ASC_API_ISSUER_ID" "$ASC_KEY_PATH"
+        run: ruby Scripts/asc_profiles.rb install "$ASC_API_KEY_ID" "$ASC_API_ISSUER_ID" "$ASC_KEY_PATH"
 
       - name: Export and upload to App Store Connect
         env:
