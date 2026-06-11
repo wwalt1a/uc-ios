@@ -13,6 +13,20 @@
 #   DIST_CERT_P12_BASE64  Base64 of an Apple Distribution certificate + private
 #                         key exported as .p12
 #   DIST_CERT_PASSWORD    Password of that .p12
+#   DEV_CERT_P12_BASE64   Base64 of an Apple Development certificate + private
+#                         key exported as .p12. Required because automatic
+#                         signing archives with development signing — the
+#                         distribution identity is only used at export time.
+#   DEV_CERT_PASSWORD     Password of that .p12
+#
+# Optional repository secrets:
+#   SENTRY_AUTH_TOKEN     Sentry org auth token (Settings → Auth Tokens) with
+#                         project:write scope. When present, dSYMs are also
+#                         uploaded to Sentry (org mkdir700 / uniclipboard-ios)
+#                         so crash stacks symbolicate there too — the
+#                         ExportOptions `uploadSymbols` flag below only feeds
+#                         Apple's own crash reports. When absent the step
+#                         warns and skips; the build still ships.
 #
 # Versioning: MARKETING_VERSION / CURRENT_PROJECT_VERSION come from the
 # committed pbxproj (the repo bumps them before tagging). ExportOptions sets
@@ -59,22 +73,27 @@ jobs:
       - name: Run model round-trip tests
         run: swift test
 
-      - name: Install signing certificate
+      - name: Install signing certificates
         env:
           DIST_CERT_P12_BASE64: ${{ secrets.DIST_CERT_P12_BASE64 }}
           DIST_CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+          DEV_CERT_P12_BASE64: ${{ secrets.DEV_CERT_P12_BASE64 }}
+          DEV_CERT_PASSWORD: ${{ secrets.DEV_CERT_PASSWORD }}
         run: |
           KEYCHAIN_PASSWORD="$(uuidgen)"
-          CERT_PATH="$RUNNER_TEMP/dist.p12"
-          echo -n "$DIST_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
-
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -P "$DIST_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+
+          echo -n "$DIST_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          echo -n "$DEV_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/dev.p12"
+          security import "$RUNNER_TEMP/dist.p12" -P "$DIST_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/dev.p12" -P "$DEV_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm "$RUNNER_TEMP/dist.p12" "$RUNNER_TEMP/dev.p12"
+
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
           security list-keychain -d user -s "$KEYCHAIN_PATH"
-          rm "$CERT_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
       - name: Write App Store Connect API key
         env:
@@ -109,6 +128,20 @@ jobs:
           name: dSYMs-${{ github.ref_name }}-${{ github.run_number }}
           path: ${{ env.ARCHIVE_PATH }}/dSYMs
           if-no-files-found: error
+
+      - name: Upload dSYMs to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::warning::SENTRY_AUTH_TOKEN not set — skipping Sentry dSYM upload (crashes in Sentry will be unsymbolicated for this build)"
+            exit 0
+          fi
+          curl -sL https://sentry.io/get-cli/ | INSTALL_DIR="$RUNNER_TEMP/bin" bash
+          "$RUNNER_TEMP/bin/sentry-cli" debug-files upload \
+            --org mkdir700 \
+            --project uniclipboard-ios \
+            "$ARCHIVE_PATH/dSYMs"
 
       - name: Export and upload to App Store Connect
         env:
