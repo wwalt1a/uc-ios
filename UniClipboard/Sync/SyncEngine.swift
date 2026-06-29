@@ -493,7 +493,16 @@ final class SyncEngine: ObservableObject {
                 lastError = nil
             } else if let serverEntry = serverEntryOrNil,
                !hashesEqual(serverEntry.hash, lastSyncedContentHash) {
-                try await processServerNew(serverEntry, client: client, vm: vm)
+                if vm.isHistoryHashHidden(serverEntry.hash) {
+                    advanceSynced(to: serverEntry.hash)
+                    stagedServerHash = nil
+                    stagedEntry = nil
+                    state = .succeeded
+                    lastSyncedAt = .now
+                    lastError = nil
+                } else {
+                    try await processServerNew(serverEntry, client: client, vm: vm)
+                }
             } else {
                 // Push side.
                 try await maybePush(client: client, vm: vm, server: server)

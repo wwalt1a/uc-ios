@@ -479,9 +479,10 @@ final class KeyboardModel: ObservableObject {
     /// that's deferred to pushDeviceClipboardIfNew so the push path isn't
     /// blocked by the record path having already stamped it.
     private func recordLocalClipboardIfNew(_ snap: DeviceClipboardSnapshot?) {
-        guard let snap, let hash = snap.clipboard.hash?.uppercased() else { return }
-        if hash == store.loadLastSyncedHash()?.uppercased() { return }
-        if store.loadHistory().first?.entry.hash?.uppercased() == hash { return }
+        guard let snap, let hash = Self.normalizedHistoryHash(snap.clipboard.hash) else { return }
+        if hash == Self.normalizedHistoryHash(store.loadLastSyncedHash()) { return }
+        if Self.normalizedHistoryHash(store.loadHistory().first?.entry.hash) == hash { return }
+        store.unhideHistoryHash(hash)
         store.appendHistory(entry: snap.clipboard, direction: .local)
     }
 
@@ -494,13 +495,13 @@ final class KeyboardModel: ObservableObject {
         server: ServerConfig,
         trust: Bool
     ) async {
-        guard let snap, let hash = snap.clipboard.hash?.uppercased() else {
+        guard let snap, let hash = Self.normalizedHistoryHash(snap.clipboard.hash) else {
             log.info("push: snap nil or no hash → .none")
             store.saveLastSyncedChangeCount(cc)
             pushStatus = .none
             return
         }
-        let lastHash = store.loadLastSyncedHash()?.uppercased()
+        let lastHash = Self.normalizedHistoryHash(store.loadLastSyncedHash())
         if hash == lastHash {
             log.info("push: hash==lastSyncedHash → .skipped (\(hash.prefix(16))…)")
             store.saveLastSyncedChangeCount(cc)
@@ -548,7 +549,7 @@ final class KeyboardModel: ObservableObject {
     /// Returns `true` iff a genuinely new entry was appended.
     @discardableResult
     private func appendPulledIfNew(_ latest: Clipboard) -> Bool {
-        guard let hash = latest.hash?.uppercased(), !hash.isEmpty else { return false }
+        guard let hash = Self.normalizedHistoryHash(latest.hash) else { return false }
         switch latest.type {
         case .text:
             if !latest.hasData && latest.text.isEmpty { return false }
@@ -557,10 +558,13 @@ final class KeyboardModel: ObservableObject {
         case .file, .group:
             return false
         }
-        if store.loadHistory().first?.entry.hash?.uppercased() == hash {
+        if Self.normalizedHistoryHash(store.loadHistory().first?.entry.hash) == hash {
             return false
         }
-        if hash == store.loadLastSyncedHash()?.uppercased() {
+        if hash == Self.normalizedHistoryHash(store.loadLastSyncedHash()) {
+            return false
+        }
+        if store.isHistoryHashHidden(hash) {
             return false
         }
         store.appendHistory(entry: latest, direction: .pulled)
@@ -581,9 +585,20 @@ final class KeyboardModel: ObservableObject {
     /// Rebuild the card row from the on-disk history log (newest-first,
     /// text + image only). Cheap enough to call after every sync half.
     private func reloadCards() {
+        let hidden = store.loadHiddenHistoryHashes()
         cards = store.loadHistory()
+            .filter { item in
+                guard let hash = Self.normalizedHistoryHash(item.entry.hash) else { return true }
+                return !hidden.contains(hash)
+            }
             .sorted { $0.timestamp > $1.timestamp }
             .compactMap(Self.card(from:))
+    }
+
+    private static func normalizedHistoryHash(_ hash: String?) -> String? {
+        guard let hash else { return nil }
+        let trimmed = hash.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed.uppercased()
     }
 
     private static func card(from item: ClipboardHistoryItem) -> Card? {

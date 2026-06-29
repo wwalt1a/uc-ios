@@ -851,6 +851,11 @@ that an export-from-Android / import-to-iOS round trip is straightforward.
 |---|---|
 | `server_config_list` | `serverConfigListToJson(...)` (§5.2) |
 | `app_settings` | `appSettingsToJson(...)` (§5.4) |
+| `clipboard_history` | Local observation log (`[ClipboardHistoryItem]`), newest-first; client-owned, not wire protocol state. |
+| `hidden_history_hashes` | Local-only list of content hashes the user removed from the UI history. Remote pulls MUST NOT reinsert matching rows until the same hash is produced locally again; this is not a server-side delete. |
+| `history_modified_after` | ISO-8601 incremental-sync watermark for `/api/history/query` (§2.7). |
+| `last_history_sync_at` | ISO-8601 local throttle timestamp for the history-sync loop. |
+| `last_synced_change_count` | iOS keyboard-extension `UIPasteboard.changeCount` watermark; skips prompting reads when no new copy occurred. |
 | `server_config` | **legacy**, single-config format. If `server_config_list` is absent and `server_config` is present, the client MUST migrate: wrap the legacy single config into a `ServerConfigList` (allocate a fresh UUID, set it as active), write the new key, delete the old key. |
 
 Legacy `server_config` shape (read-only, write-once-on-migrate):

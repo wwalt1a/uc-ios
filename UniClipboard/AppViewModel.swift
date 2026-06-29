@@ -55,6 +55,11 @@ final class AppViewModel: ObservableObject {
     /// tricks. Older entries fall off when `appendHistory` grows past it.
     private static let maxHistoryCount = 200
 
+    /// Hashes the user explicitly removed from the local Home history. This
+    /// is not a server delete; it only stops server history/live-latest pulls
+    /// from re-creating rows the user just hid.
+    private var hiddenHistoryHashes: Set<String> = []
+
     /// Incremental-sync watermark for §2.7 `POST /api/history/query`. The
     /// largest `lastModified` seen on any prior page; passed back as
     /// `modifiedAfter` so the server only returns strictly newer records.
@@ -171,7 +176,11 @@ final class AppViewModel: ObservableObject {
         self.pasteboard = pasteboard ?? DevicePasteboardObserver()
         self.servers = forceFreshServers ? ServerConfigList() : store.loadServers()
         self.appSettings = store.loadAppSettings()
-        self.history = store.loadHistory()
+        let hiddenHistoryHashes = store.loadHiddenHistoryHashes()
+        self.hiddenHistoryHashes = hiddenHistoryHashes
+        self.history = store.loadHistory().filter {
+            !Self.isHistoryItem($0, hiddenBy: hiddenHistoryHashes)
+        }
         self.historyWatermark = store.loadHistoryWatermark()
         self.ssidProvider = CurrentSSIDProvider()
         self.engine = SyncEngine(viewModel: self, store: store)
@@ -672,12 +681,20 @@ final class AppViewModel: ObservableObject {
 
     /// Remove one row from the in-memory `history` list. Operates on the
     /// stable `ClipboardHistoryItem.id` so deletion is safe across
-    /// re-sorts. The protocol has no concept of "delete from server" for
-    /// the live clipboard — the spec only keeps one record, so this is a
-    /// local-cache-only mutation today.
+    /// re-sorts. This is local-only: matching hashes are tombstoned in the
+    /// App Group so a subsequent server history pull does not immediately
+    /// resurrect the row, but no server-side soft-delete is issued.
     func removeHistoryItem(id: UUID) {
-        let removed = history.filter { $0.id == id }
-        history.removeAll { $0.id == id }
+        let targetHashes = Set(history.filter { $0.id == id }.compactMap {
+            Self.normalizedHistoryHash($0.entry.hash)
+        })
+        let removed = history.filter { item in
+            item.id == id || Self.isHistoryItem(item, hiddenBy: targetHashes)
+        }
+        hideHistoryHashes(Array(targetHashes))
+        history.removeAll { item in
+            item.id == id || Self.isHistoryItem(item, hiddenBy: targetHashes)
+        }
         Self.scheduleCacheDelete(removed.compactMap { Self.profileIdIfAny($0.entry) })
     }
 
@@ -691,14 +708,21 @@ final class AppViewModel: ObservableObject {
     /// publisher chose not to fingerprint, and we have nothing to dedup
     /// against.
     func appendHistory(entry: Clipboard, direction: ClipboardHistoryItem.Direction, at timestamp: Date = .now) {
+        let normalizedHash = Self.normalizedHistoryHash(entry.hash)
+        switch direction {
+        case .local, .pushed:
+            unhideHistoryHash(normalizedHash)
+        case .pulled:
+            guard !isHistoryHashHidden(normalizedHash) else { return }
+        }
         // Same content already at the top → never insert a duplicate row,
         // regardless of direction. Upgrade `.local` provenance to
         // pushed/pulled in place; keep the stronger direction otherwise
         // (a re-observation of content we already attributed shouldn't
         // downgrade it back to `.local`).
-        if let hash = entry.hash,
+        if let hash = normalizedHash,
            let last = history.first,
-           last.entry.hash == hash {
+           Self.normalizedHistoryHash(last.entry.hash) == hash {
             if direction != .local, last.direction != direction {
                 history[0].direction = direction
             }
@@ -712,10 +736,9 @@ final class AppViewModel: ObservableObject {
     }
 
     func updateHistoryDirection(hash: String?, to newDirection: ClipboardHistoryItem.Direction) {
-        guard let hash, !hash.isEmpty else { return }
-        let normalized = hash.uppercased()
+        guard let normalized = Self.normalizedHistoryHash(hash) else { return }
         if let idx = history.firstIndex(where: {
-            $0.entry.hash?.uppercased() == normalized
+            Self.normalizedHistoryHash($0.entry.hash) == normalized
         }) {
             history[idx].direction = newDirection
         }
@@ -744,11 +767,13 @@ final class AppViewModel: ObservableObject {
     func mergeHistoryRecord(_ record: HistoryRecord) {
         let normalized = record.hash.uppercased()
         if record.isDeleted {
-            history.removeAll { ($0.entry.hash?.uppercased()) == normalized }
+            history.removeAll { Self.normalizedHistoryHash($0.entry.hash) == normalized }
+            unhideHistoryHash(normalized)
             Self.scheduleCacheDelete([HistoryRecord.profileId(type: record.type, hash: normalized)])
             return
         }
-        if let idx = history.firstIndex(where: { ($0.entry.hash?.uppercased()) == normalized }) {
+        guard !isHistoryHashHidden(normalized) else { return }
+        if let idx = history.firstIndex(where: { Self.normalizedHistoryHash($0.entry.hash) == normalized }) {
             let serverStamp = record.createTime ?? record.lastModified ?? history[idx].timestamp
             history[idx].timestamp = min(history[idx].timestamp, serverStamp)
             return
@@ -1037,10 +1062,15 @@ final class AppViewModel: ObservableObject {
     /// resurrects (a delete persisted to disk, so it's absent from both
     /// sides). Idempotent and cheap; safe to call on every `.active`.
     func reconcileSharedHistory() {
+        hiddenHistoryHashes = store.loadHiddenHistoryHashes()
         let disk = store.loadHistory()
         var byId: [UUID: ClipboardHistoryItem] = [:]
-        for item in history { byId[item.id] = item }
-        for item in disk { byId[item.id] = item }   // disk wins on conflicts
+        for item in history where !Self.isHistoryItem(item, hiddenBy: hiddenHistoryHashes) {
+            byId[item.id] = item
+        }
+        for item in disk where !Self.isHistoryItem(item, hiddenBy: hiddenHistoryHashes) {
+            byId[item.id] = item   // disk wins on conflicts
+        }
         let merged = byId.values.sorted { $0.timestamp > $1.timestamp }
         let capped = merged.count > Self.maxHistoryCount ? Array(merged.prefix(Self.maxHistoryCount)) : Array(merged)
         // Only assign (triggering the persisting didSet) if something actually
@@ -1071,6 +1101,36 @@ final class AppViewModel: ObservableObject {
     private static func profileIdIfAny(_ entry: Clipboard) -> String? {
         guard let hash = entry.hash, !hash.isEmpty else { return nil }
         return HistoryRecord.profileId(type: entry.type, hash: hash.uppercased())
+    }
+
+    private static func normalizedHistoryHash(_ hash: String?) -> String? {
+        guard let hash else { return nil }
+        let trimmed = hash.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed.uppercased()
+    }
+
+    private static func isHistoryItem(_ item: ClipboardHistoryItem, hiddenBy hidden: Set<String>) -> Bool {
+        guard let hash = normalizedHistoryHash(item.entry.hash) else { return false }
+        return hidden.contains(hash)
+    }
+
+    func isHistoryHashHidden(_ hash: String?) -> Bool {
+        guard let hash = Self.normalizedHistoryHash(hash) else { return false }
+        return hiddenHistoryHashes.contains(hash)
+    }
+
+    private func hideHistoryHashes(_ hashes: [String]) {
+        let normalized = hashes.compactMap { Self.normalizedHistoryHash($0) }
+        guard !normalized.isEmpty else { return }
+        hiddenHistoryHashes.formUnion(normalized)
+        store.saveHiddenHistoryHashes(hiddenHistoryHashes)
+        store.hideHistoryHashes(normalized)
+    }
+
+    private func unhideHistoryHash(_ hash: String?) {
+        guard let hash = Self.normalizedHistoryHash(hash) else { return }
+        guard hiddenHistoryHashes.remove(hash) != nil else { return }
+        store.saveHiddenHistoryHashes(hiddenHistoryHashes)
     }
 
     /// Fire-and-forget delete of a batch of cache files. Spawned from a

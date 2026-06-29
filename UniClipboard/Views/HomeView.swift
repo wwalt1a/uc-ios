@@ -556,6 +556,7 @@ struct HomeView: View {
                 serverLabel: vm.activeServer?.displayLabel ?? String(localized: "未配置"),
                 isAutoSwitched: vm.activeServer?.id != vm.servers.activeConfig?.id,
                 isSyncing: isExplicitlyRefreshing,
+                showsPasteButton: vm.pasteboardDetection != nil && !vm.appSettings.autoPushDeviceChanges,
                 glassNamespace: glassNS,
                 onSearch: {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
@@ -567,6 +568,9 @@ struct HomeView: View {
                 },
                 onSync: {
                     handleSync()
+                },
+                onPaste: { providers in
+                    Task { await vm.pushPastedProviders(providers) }
                 }
             )
         }

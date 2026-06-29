@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// Bottom toolbar replacing the TabView — search, server picker, sync.
@@ -6,6 +7,7 @@ struct HomeBottomToolbar: View {
     let serverLabel: String
     var isAutoSwitched: Bool = false
     var isSyncing: Bool = false
+    var showsPasteButton: Bool = false
     /// Shared glass namespace from the host so the search button can liquid-morph
     /// into the search field's capsule when search opens. `nil` in standalone use
     /// (e.g. previews), where the search button simply renders without morphing.
@@ -15,17 +17,28 @@ struct HomeBottomToolbar: View {
     let onSearch: () -> Void
     let onServerPicker: () -> Void
     let onSync: () -> Void
+    let onPaste: ([NSItemProvider]) -> Void
 
     var body: some View {
         HStack {
-            Button(action: onSearch) {
-                Image(systemName: "magnifyingglass")
-                    .font(.title2)
-                    .frame(width: 52, height: 52)
-                    .liquidGlassCircle(interactive: true)
-                    .glassMorphID("search", in: glassNamespace)
+            if showsPasteButton {
+                PasteButton(supportedContentTypes: PastedItemExtractor.supportedContentTypes) { providers in
+                    onPaste(providers)
+                }
+                .labelStyle(.iconOnly)
+                .buttonBorderShape(.circle)
+                .frame(width: 52, height: 52)
+                .accessibilityLabel(Text("粘贴并同步"))
+            } else {
+                Button(action: onSearch) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.title2)
+                        .frame(width: 52, height: 52)
+                        .liquidGlassCircle(interactive: true)
+                        .glassMorphID("search", in: glassNamespace)
+                }
+                .accessibilityLabel(Text("搜索"))
             }
-            .accessibilityLabel(Text("搜索"))
 
             Spacer()
 
@@ -90,7 +103,8 @@ struct HomeBottomToolbar: View {
                 isSyncing: false,
                 onSearch: {},
                 onServerPicker: {},
-                onSync: {}
+                onSync: {},
+                onPaste: { _ in }
             )
         }
     }

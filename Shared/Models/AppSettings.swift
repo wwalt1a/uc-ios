@@ -243,5 +243,9 @@ public extension AppSettings {
         /// Lets the keyboard's uplink skip the prompting content read when
         /// nothing new has been copied since. Not a user setting.
         public static let lastSyncedChangeCount = "last_synced_change_count"
+        /// Local-only tombstones for history rows the user removed from the
+        /// Home list. A server-side history pull may still return those
+        /// records; this set stops them from being merged back immediately.
+        public static let hiddenHistoryHashes = "hidden_history_hashes"
     }
 }

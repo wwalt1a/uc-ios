@@ -345,6 +345,61 @@ public final class SettingsStore: @unchecked Sendable {
         defaults.set(data, forKey: AppSettings.PersistenceKey.clipboardHistory)
     }
 
+    /// Load hashes for rows the user explicitly removed from local history.
+    /// Corruption/missing key reads as an empty set so sync is never blocked.
+    public func loadHiddenHistoryHashes() -> Set<String> {
+        guard let data = defaults.data(forKey: AppSettings.PersistenceKey.hiddenHistoryHashes) else {
+            return []
+        }
+        let decoded = (try? decoder.decode([String].self, from: data)) ?? []
+        return Set(decoded.compactMap { Self.normalizedHistoryHash($0) })
+    }
+
+    public func saveHiddenHistoryHashes(_ hashes: Set<String>) {
+        let normalized = hashes.compactMap { Self.normalizedHistoryHash($0) }.sorted()
+        if normalized.isEmpty {
+            defaults.removeObject(forKey: AppSettings.PersistenceKey.hiddenHistoryHashes)
+            return
+        }
+        guard let data = try? encoder.encode(normalized) else { return }
+        defaults.set(data, forKey: AppSettings.PersistenceKey.hiddenHistoryHashes)
+    }
+
+    /// Mark `hashes` as hidden and remove any matching rows from the shared
+    /// history log. This is local-only: it does not soft-delete server history.
+    public func hideHistoryHashes(_ hashes: [String]) {
+        var hidden = loadHiddenHistoryHashes()
+        let normalized = hashes.compactMap { Self.normalizedHistoryHash($0) }
+        guard !normalized.isEmpty else { return }
+        hidden.formUnion(normalized)
+        saveHiddenHistoryHashes(hidden)
+
+        let filtered = loadHistory().filter { item in
+            guard let hash = Self.normalizedHistoryHash(item.entry.hash) else {
+                return true
+            }
+            return !hidden.contains(hash)
+        }
+        saveHistory(filtered)
+    }
+
+    /// A fresh local copy / explicit user push should make the same content
+    /// visible again. Remote pulls deliberately do not call this, so deleting
+    /// a row still suppresses server-side replays.
+    public func unhideHistoryHash(_ hash: String?) {
+        guard let normalized = Self.normalizedHistoryHash(hash) else { return }
+        var hidden = loadHiddenHistoryHashes()
+        guard hidden.remove(normalized) != nil else { return }
+        saveHiddenHistoryHashes(hidden)
+    }
+
+    public func isHistoryHashHidden(_ hash: String?) -> Bool {
+        guard let normalized = Self.normalizedHistoryHash(hash) else {
+            return false
+        }
+        return loadHiddenHistoryHashes().contains(normalized)
+    }
+
     /// Append one observation to the shared history log (App Group),
     /// newest-first, deduped against the most-recent same-direction+hash
     /// entry, and capped. Mirrors `AppViewModel.appendHistory` so an
@@ -363,13 +418,19 @@ public final class SettingsStore: @unchecked Sendable {
         at timestamp: Date = Date(),
         cap: Int = 200
     ) {
+        let normalizedHash = Self.normalizedHistoryHash(entry.hash)
+        if direction == .local || direction == .pushed {
+            unhideHistoryHash(normalizedHash)
+        } else if let normalizedHash, isHistoryHashHidden(normalizedHash) {
+            return
+        }
         var items = loadHistory()
         // Same content already at the head → never insert a duplicate row,
         // regardless of direction. Upgrade `.local` provenance to
         // pushed/pulled in place; keep the stronger direction otherwise.
-        if let hash = entry.hash,
+        if let hash = normalizedHash,
            let last = items.first,
-           last.entry.hash == hash {
+           Self.normalizedHistoryHash(last.entry.hash) == hash {
             if direction != .local, last.direction != direction {
                 items[0].direction = direction
                 saveHistory(items)
@@ -382,6 +443,12 @@ public final class SettingsStore: @unchecked Sendable {
         )
         if items.count > cap { items = Array(items.prefix(cap)) }
         saveHistory(items)
+    }
+
+    private static func normalizedHistoryHash(_ hash: String?) -> String? {
+        guard let hash else { return nil }
+        let trimmed = hash.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed.uppercased()
     }
 
     /// Move the history item with `id` to the head of the log by stamping

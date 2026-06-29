@@ -221,6 +221,54 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.loadHistory(), [])
     }
 
+    func test_hiddenHistoryHashes_roundTripNormalizeAndNilClears() {
+        let store = makeStore()
+        store.saveHiddenHistoryHashes(["abc", " ABC ", "def"])
+
+        XCTAssertEqual(store.loadHiddenHistoryHashes(), Set(["ABC", "DEF"]))
+
+        store.saveHiddenHistoryHashes([])
+        XCTAssertTrue(store.loadHiddenHistoryHashes().isEmpty)
+        XCTAssertNil(defaults.data(forKey: AppSettings.PersistenceKey.hiddenHistoryHashes))
+    }
+
+    func test_hideHistoryHashes_removesMatchingRowsAndSuppressesPulledAppend() {
+        let store = makeStore()
+        let hidden = Clipboard(type: .text, hash: "AA11", text: "hidden", hasData: false, size: 6)
+        let visible = Clipboard(type: .text, hash: "BB22", text: "visible", hasData: false, size: 7)
+        store.saveHistory([
+            ClipboardHistoryItem(entry: hidden, timestamp: Date(timeIntervalSince1970: 2), direction: .pulled),
+            ClipboardHistoryItem(entry: visible, timestamp: Date(timeIntervalSince1970: 1), direction: .pulled),
+        ])
+
+        store.hideHistoryHashes(["aa11"])
+
+        XCTAssertEqual(store.loadHiddenHistoryHashes(), Set(["AA11"]))
+        XCTAssertEqual(store.loadHistory().map(\.entry.hash), ["BB22"])
+
+        store.appendHistory(entry: hidden, direction: .pulled)
+        XCTAssertEqual(
+            store.loadHistory().map(\.entry.hash),
+            ["BB22"],
+            "Remote history/live pulls must not resurrect a locally hidden row"
+        )
+    }
+
+    func test_appendHistory_localAndPushedUnhideHash() {
+        let store = makeStore()
+        let clip = Clipboard(type: .text, hash: "AA11", text: "again", hasData: false, size: 5)
+        store.hideHistoryHashes(["AA11"])
+
+        store.appendHistory(entry: clip, direction: .local)
+        XCTAssertFalse(store.isHistoryHashHidden("aa11"))
+        XCTAssertEqual(store.loadHistory().first?.entry.hash, "AA11")
+
+        store.hideHistoryHashes(["AA11"])
+        store.appendHistory(entry: clip, direction: .pushed)
+        XCTAssertFalse(store.isHistoryHashHidden("AA11"))
+        XCTAssertEqual(store.loadHistory().first?.entry.hash, "AA11")
+    }
+
     // MARK: - T9: history watermark
 
     func test_loadHistoryWatermark_whenEmpty_returnsNil() {
