@@ -99,6 +99,13 @@ final class SyncEngine: ObservableObject {
     /// fetch when auto-apply is off and the server hash hasn't changed.
     private var stagedServerHash: String?
 
+    /// A user-tapped `PasteButton` push is in flight or has just succeeded.
+    /// Until a fresh GET confirms this hash, stale GETs that started before
+    /// the PUT may still return the previous server value; suppress those so
+    /// the old remote entry does not jump back above the user's new content.
+    private var pendingLocalPushHash: String?
+    private var pendingLocalPushStartedAt: Date?
+
     private var loopTask: Task<Void, Never>?
 
     private var isTicking: Bool = false
@@ -442,6 +449,11 @@ final class SyncEngine: ObservableObject {
         // ran — a copy made while the server is unreachable still lands its
         // history card on the next 1s tick. Explicit refreshes punch through.
         if !explicit, let next = nextNetworkAttemptAt, Date() < next { return }
+        if let started = pendingLocalPushStartedAt,
+           Date().timeIntervalSince(started) > 5 {
+            pendingLocalPushHash = nil
+            pendingLocalPushStartedAt = nil
+        }
         log.debug("tick: explicit=\(explicit, privacy: .public) state=\(String(describing: self.state), privacy: .public) url=\(server.url, privacy: .public) consecutiveFailures=\(self.consecutiveFailures, privacy: .public)")
         // Cross-process re-sync: the Share Extension writes
         // `lastSyncedContentHash` directly into the App Group when it
@@ -473,7 +485,26 @@ final class SyncEngine: ObservableObject {
                 // Empty server — leave serverLatest as-is, fall through.
                 serverEntryOrNil = nil
             }
-            if let serverEntry = serverEntryOrNil,
+            if let pending = pendingLocalPushHash,
+               let serverEntry = serverEntryOrNil,
+               !hashesEqual(serverEntry.hash, pending) {
+                // A user-explicit local push has priority over a stale GET
+                // result from before the PUT reached the server.
+                state = .succeeded
+                lastSyncedAt = .now
+                lastError = nil
+            } else if let pending = pendingLocalPushHash,
+                      let serverEntry = serverEntryOrNil,
+                      hashesEqual(serverEntry.hash, pending) {
+                pendingLocalPushHash = nil
+                pendingLocalPushStartedAt = nil
+                advanceSynced(to: serverEntry.hash)
+                stagedServerHash = nil
+                stagedEntry = nil
+                state = .succeeded
+                lastSyncedAt = .now
+                lastError = nil
+            } else if let serverEntry = serverEntryOrNil,
                let serverHash = serverEntry.hash, !serverHash.isEmpty,
                let deviceHash = vm.deviceClipboard?.hash, !deviceHash.isEmpty,
                hashesEqual(serverHash, deviceHash) {
@@ -761,6 +792,9 @@ final class SyncEngine: ObservableObject {
         guard let vm = viewModel else { return }
 
         let entry = snapshot.clipboard
+        let entryHash = normalizedHash(entry.hash)
+        pendingLocalPushHash = entryHash
+        pendingLocalPushStartedAt = .now
         // Always record locally first, regardless of server availability —
         // seeding the byte caches before the append so the card's
         // thumbnail finds them the moment it renders.
@@ -768,13 +802,30 @@ final class SyncEngine: ObservableObject {
         vm.appendHistory(entry: entry, direction: .local)
         vm.adoptConsentPush(entry)
 
-        guard let server = vm.activeServer else { return }
-        if state == .authFailed || state == .loopDetected { return }
+        guard let server = vm.activeServer else {
+            if hashesEqual(pendingLocalPushHash, entryHash) { pendingLocalPushHash = nil }
+            if pendingLocalPushHash == nil { pendingLocalPushStartedAt = nil }
+            return
+        }
+        if state == .authFailed || state == .loopDetected {
+            if hashesEqual(pendingLocalPushHash, entryHash) { pendingLocalPushHash = nil }
+            if pendingLocalPushHash == nil { pendingLocalPushStartedAt = nil }
+            return
+        }
         do {
-            guard let pushed = try await vm.pushSnapshot(snapshot) else { return }
+            guard let pushed = try await vm.pushSnapshot(snapshot) else {
+                if hashesEqual(pendingLocalPushHash, entryHash) { pendingLocalPushHash = nil }
+                if pendingLocalPushHash == nil { pendingLocalPushStartedAt = nil }
+                return
+            }
+            pendingLocalPushHash = normalizedHash(pushed.hash)
+            pendingLocalPushStartedAt = .now
             advanceSynced(to: pushed.hash)
-            lastAppliedContentHash = pushed.hash?.uppercased()
-            vm.updateHistoryDirection(hash: pushed.hash, to: .pushed)
+            lastAppliedContentHash = normalizedHash(pushed.hash)
+            stagedServerHash = nil
+            stagedEntry = nil
+            vm.appendHistory(entry: pushed, direction: .pushed)
+            vm.adoptConsentPush(pushed)
             loopGuard.record(.pushed, hash: pushed.hash)
             if loopGuard.tripped() { tripLoopBreaker(); return }
             state = .succeeded
@@ -783,14 +834,20 @@ final class SyncEngine: ObservableObject {
             consecutiveFailures = 0
             Task { await ShareIntentDonation.donateSend(to: server, clipboard: pushed) }
         } catch let e as SyncError where e.kind == .authFailed {
+            if hashesEqual(pendingLocalPushHash, entryHash) { pendingLocalPushHash = nil }
+            if pendingLocalPushHash == nil { pendingLocalPushStartedAt = nil }
             state = .authFailed
             lastError = e
             stop()
         } catch let e as SyncError {
+            if hashesEqual(pendingLocalPushHash, entryHash) { pendingLocalPushHash = nil }
+            if pendingLocalPushHash == nil { pendingLocalPushStartedAt = nil }
             consecutiveFailures += 1
             state = .offlineRetrying
             lastError = e
         } catch {
+            if hashesEqual(pendingLocalPushHash, entryHash) { pendingLocalPushHash = nil }
+            if pendingLocalPushHash == nil { pendingLocalPushStartedAt = nil }
             consecutiveFailures += 1
             state = .offlineRetrying
             lastError = SyncError(kind: .networkUnreachable, underlying: "\(error)")
@@ -943,14 +1000,16 @@ final class SyncEngine: ObservableObject {
 
     private func isHashInRecentHistory(vm: AppViewModel, hash: String) -> Bool {
         guard let first = vm.history.first else { return false }
-        return first.entry.hash?.uppercased() == hash
+        return normalizedHash(first.entry.hash) == normalizedHash(hash)
     }
 
     private func hashesEqual(_ a: String?, _ b: String?) -> Bool {
-        switch (a, b) {
-        case (nil, nil): return true
-        case (let l?, let r?): return l.uppercased() == r.uppercased()
-        default: return false
-        }
+        normalizedHash(a) == normalizedHash(b)
+    }
+
+    private func normalizedHash(_ hash: String?) -> String? {
+        guard let hash else { return nil }
+        let trimmed = hash.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed.uppercased()
     }
 }

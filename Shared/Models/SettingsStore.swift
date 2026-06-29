@@ -425,16 +425,20 @@ public final class SettingsStore: @unchecked Sendable {
             return
         }
         var items = loadHistory()
-        // Same content already at the head → never insert a duplicate row,
-        // regardless of direction. Upgrade `.local` provenance to
-        // pushed/pulled in place; keep the stronger direction otherwise.
+        // Same content already exists anywhere in the log -> promote it
+        // instead of inserting a duplicate. This mirrors the app-layer
+        // history behavior and keeps extension writes from re-creating a
+        // pulled row that the main app already knows about.
         if let hash = normalizedHash,
-           let last = items.first,
-           Self.normalizedHistoryHash(last.entry.hash) == hash {
-            if direction != .local, last.direction != direction {
-                items[0].direction = direction
-                saveHistory(items)
+           let idx = items.firstIndex(where: { Self.normalizedHistoryHash($0.entry.hash) == hash }) {
+            var item = items.remove(at: idx)
+            item.entry = entry
+            item.timestamp = timestamp
+            if direction != .local, item.direction != direction {
+                item.direction = direction
             }
+            items.insert(item, at: 0)
+            saveHistory(items)
             return
         }
         items.insert(

@@ -269,6 +269,28 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.loadHistory().first?.entry.hash, "AA11")
     }
 
+    func test_appendHistory_promotesExistingHashInsteadOfDuplicating() {
+        let store = makeStore()
+        let oldRemote = Clipboard(type: .text, hash: "AA11", text: "a1", hasData: false, size: 2)
+        let newerLocal = Clipboard(type: .text, hash: "BB22", text: "ios", hasData: false, size: 3)
+        store.saveHistory([
+            ClipboardHistoryItem(entry: newerLocal, timestamp: Date(timeIntervalSince1970: 20), direction: .local),
+            ClipboardHistoryItem(entry: oldRemote, timestamp: Date(timeIntervalSince1970: 10), direction: .pulled),
+        ])
+
+        let refreshedRemote = Clipboard(type: .text, hash: " aa11 ", text: "a1", hasData: false, size: 2)
+        store.appendHistory(
+            entry: refreshedRemote,
+            direction: .pulled,
+            at: Date(timeIntervalSince1970: 30)
+        )
+
+        let history = store.loadHistory()
+        XCTAssertEqual(history.map { $0.entry.hash?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }, ["AA11", "BB22"])
+        XCTAssertEqual(history.first?.direction, .pulled)
+        XCTAssertEqual(history.first?.timestamp, Date(timeIntervalSince1970: 30))
+    }
+
     // MARK: - T9: history watermark
 
     func test_loadHistoryWatermark_whenEmpty_returnsNil() {

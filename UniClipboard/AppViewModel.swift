@@ -715,17 +715,21 @@ final class AppViewModel: ObservableObject {
         case .pulled:
             guard !isHistoryHashHidden(normalizedHash) else { return }
         }
-        // Same content already at the top → never insert a duplicate row,
-        // regardless of direction. Upgrade `.local` provenance to
-        // pushed/pulled in place; keep the stronger direction otherwise
-        // (a re-observation of content we already attributed shouldn't
-        // downgrade it back to `.local`).
+        // Same content already exists anywhere in the list -> promote it
+        // instead of inserting a duplicate. This matters when the user
+        // pushes new local content while an older server entry is still in
+        // history: the next server observation must not create a second card
+        // for that older hash just because it is no longer the head row.
         if let hash = normalizedHash,
-           let last = history.first,
-           Self.normalizedHistoryHash(last.entry.hash) == hash {
-            if direction != .local, last.direction != direction {
-                history[0].direction = direction
+           let idx = history.firstIndex(where: { Self.normalizedHistoryHash($0.entry.hash) == hash }) {
+            var item = history.remove(at: idx)
+            item.entry = entry
+            item.timestamp = timestamp
+            if direction != .local, item.direction != direction {
+                item.direction = direction
             }
+            history.insert(item, at: 0)
+            trimHistoryAndPruneCache()
             return
         }
         history.insert(
