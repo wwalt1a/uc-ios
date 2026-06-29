@@ -26,7 +26,6 @@ struct HomeBottomToolbar: View {
                     onPaste(providers)
                 }
                 .labelStyle(.iconOnly)
-                .buttonBorderShape(.circle)
                 .frame(width: 52, height: 52)
                 .accessibilityLabel(Text("粘贴并同步"))
             } else {
