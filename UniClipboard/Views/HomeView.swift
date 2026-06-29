@@ -291,9 +291,7 @@ struct HomeView: View {
     private var gridOrEmpty: some View {
         if sortedHistory.isEmpty {
             // Wrap the empty state in a ScrollView so `.refreshable` (attached
-            // on the body) actually engages: ContentUnavailableView is not
-            // scrollable on its own, so pull-to-refresh never fired here —
-            // exactly when the user most wants to retry.
+            // on the body) actually engages when the user most wants to retry.
             GeometryReader { proxy in
                 ScrollView(.vertical) {
                     VStack(spacing: 16) {

@@ -136,7 +136,7 @@ struct ClipboardCard: View {
     }
 
     private var imagePlaceholder: some View {
-        Color(item.entry.displayKind.tint).opacity(0.12)
+        item.entry.displayKind.tint.opacity(0.12)
             .overlay {
                 Image(systemName: "photo.fill")
                     .font(.largeTitle)

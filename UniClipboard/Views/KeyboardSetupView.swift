@@ -80,9 +80,18 @@ struct KeyboardSetupView: View {
     }
 }
 
-#Preview {
-    @Previewable @State var settings = AppSettings.defaults
-    return NavigationStack {
-        KeyboardSetupView(appSettings: $settings)
+#if DEBUG
+private struct KeyboardSetupViewPreview: View {
+    @State private var settings = AppSettings.defaults
+
+    var body: some View {
+        NavigationStack {
+            KeyboardSetupView(appSettings: $settings)
+        }
     }
 }
+
+#Preview {
+    KeyboardSetupViewPreview()
+}
+#endif

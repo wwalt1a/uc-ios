@@ -826,9 +826,18 @@ private struct AboutView: View {
     }
 }
 
-#Preview {
-    @Previewable @State var path: [SettingsRoute] = []
-    return NavigationStack(path: $path) {
-        SettingsView(vm: .preview(), path: $path)
+#if DEBUG
+private struct SettingsViewPreview: View {
+    @State private var path: [SettingsRoute] = []
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            SettingsView(vm: .preview(), path: $path)
+        }
     }
 }
+
+#Preview {
+    SettingsViewPreview()
+}
+#endif
