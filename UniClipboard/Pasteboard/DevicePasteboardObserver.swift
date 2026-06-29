@@ -1,6 +1,6 @@
 import Foundation
 import UIKit
-import Observation
+import Combine
 
 /// Reads `UIPasteboard.general` and exposes the result as an observable
 /// `Clipboard?`. App-target-only (UIKit dependency); not built by SwiftPM.
@@ -46,10 +46,9 @@ import Observation
 /// + `SyncEngine.consentPush`); the content reads that remain here only run
 /// when the user opts into fully-automatic push.
 @MainActor
-@Observable
-final class DevicePasteboardObserver {
+final class DevicePasteboardObserver: ObservableObject {
 
-    private(set) var current: Clipboard?
+    @Published private(set) var current: Clipboard?
 
     /// A free, no-prompt hint that the device pasteboard holds content the
     /// user could push — derived purely from `changeCount` + the
@@ -59,15 +58,12 @@ final class DevicePasteboardObserver {
     /// pushed/dismissed). Home renders a one-tap `PasteButton` card off
     /// this; the actual content read only happens when the user taps that
     /// system button (which grants access without a prompt).
-    private(set) var detection: PasteboardDetection?
+    @Published private(set) var detection: PasteboardDetection?
 
-    @ObservationIgnored
     private let envMode: EnvMode
 
-    @ObservationIgnored
     private var observers: [NSObjectProtocol] = []
 
-    @ObservationIgnored
     private let notificationCenter: NotificationCenter
 
     /// `UIPasteboard.changeCount` recorded immediately after our own write.
@@ -78,7 +74,6 @@ final class DevicePasteboardObserver {
     /// as mismatched). External copies always advance changeCount further,
     /// so they still propagate. `-1` as initial sentinel is safe because
     /// `UIPasteboard.changeCount` is non-negative.
-    @ObservationIgnored
     private var lastWriteChangeCount: Int = -1
 
     /// `UIPasteboard.changeCount` recorded after the last successful read,
@@ -92,7 +87,6 @@ final class DevicePasteboardObserver {
     /// the read that triggered it returns nil, so `current` is stuck nil
     /// until something re-reads. SyncEngine drives that re-read once per
     /// tick via `pollIfChanged`, which is cheap when nothing changed.
-    @ObservationIgnored
     private var lastObservedChangeCount: Int = -1
 
     /// `UIPasteboard.changeCount` of the most recent content the user
@@ -102,7 +96,6 @@ final class DevicePasteboardObserver {
     /// something genuinely new. `-1` sentinel so a fresh launch surfaces
     /// whatever is already on the pasteboard. Distinct from
     /// `lastWriteChangeCount` (which tracks our own pasteboard *writes*).
-    @ObservationIgnored
     private var lastConsumedChangeCount: Int = -1
 
     /// Content hash of the most recent value we wrote to `UIPasteboard`,
@@ -115,7 +108,6 @@ final class DevicePasteboardObserver {
     /// different §4.2 basename (because `imageUTIPriority` canonicalizes
     /// to `image.<ext>`), and that re-snapshotted hash drives a spurious
     /// push that pings back as the next pull — the apply↔push pong.
-    @ObservationIgnored
     private var lastWrittenContentHash: String?
 
     /// Gate that defers the first live `UIPasteboard.general` access until
@@ -126,7 +118,6 @@ final class DevicePasteboardObserver {
     /// over a splash / Setup flow they're still trying to read. Env-driven
     /// modes never touch `UIPasteboard.general`, so they auto-activate in
     /// init and previews / screenshot recipes keep working unchanged.
-    @ObservationIgnored
     private var isActive: Bool = false
 
     init(

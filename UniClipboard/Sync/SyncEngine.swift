@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 import OSLog
 import SentryWithoutUIKit
 
@@ -44,8 +44,7 @@ private let log = Logger(subsystem: "app.uniclipboard", category: "sync")
 /// - `.notFound` (404) on server GET is the documented "empty server"
 ///   state and is treated as success — fall through to the push side.
 @MainActor
-@Observable
-final class SyncEngine {
+final class SyncEngine: ObservableObject {
     enum State: Equatable {
         case idle
         case succeeded
@@ -60,29 +59,26 @@ final class SyncEngine {
         case loopDetected
     }
 
-    private(set) var state: State = .idle
-    private(set) var lastSyncedAt: Date?
-    private(set) var lastError: SyncError?
+    @Published private(set) var state: State = .idle
+    @Published private(set) var lastSyncedAt: Date?
+    @Published private(set) var lastError: SyncError?
 
     /// Server entry that was fetched but not written to UIPasteboard
     /// because `appSettings.autoApplyServerChanges == false`. UI can show
     /// it highlighted/expanded. `nil` when nothing is staged.
-    private(set) var stagedEntry: Clipboard?
+    @Published private(set) var stagedEntry: Clipboard?
 
     /// True while a user-explicit tick (pull-to-refresh, toolbar refresh
     /// button) is in flight. Routine 1Hz ticks DO NOT flip this — the
     /// connector and toolbar reflect the last stable result state so users
     /// see "已同步" most of the time instead of a flickering "同步中…"
     /// every second.
-    private(set) var isExplicitlyRefreshing: Bool = false
+    @Published private(set) var isExplicitlyRefreshing: Bool = false
 
-    @ObservationIgnored
     private weak var viewModel: AppViewModel?
 
-    @ObservationIgnored
     private let store: SettingsStore
 
-    @ObservationIgnored
     private var lastSyncedContentHash: String?
 
     /// The hash we most recently *wrote to UIPasteboard* via apply. Tracked
@@ -92,24 +88,19 @@ final class SyncEngine {
     /// hash slightly differently from the server hash we just applied,
     /// `maybePush` won't push the freshly-applied content back. Cleared
     /// (along with `lastSyncedContentHash`) when the active server flips.
-    @ObservationIgnored
     private var lastAppliedContentHash: String?
 
     /// Cycle detector. Records every apply / push and trips when the same
     /// hash flips direction too many times — see `SyncLoopGuard` for the
     /// state machine.
-    @ObservationIgnored
     private var loopGuard = SyncLoopGuard()
 
     /// Hash we already downloaded but didn't write. Used to dedup the bytes
     /// fetch when auto-apply is off and the server hash hasn't changed.
-    @ObservationIgnored
     private var stagedServerHash: String?
 
-    @ObservationIgnored
     private var loopTask: Task<Void, Never>?
 
-    @ObservationIgnored
     private var isTicking: Bool = false
 
     /// Client of the in-flight tick's server round-trip, held so
@@ -120,12 +111,10 @@ final class SyncEngine {
     /// Wi-Fi → cellular flip). Cleared when the tick unwinds; the detached
     /// history-sync task may keep the client alive past that, which is
     /// fine — history sync is best-effort and swallows its own errors.
-    @ObservationIgnored
     private var inFlightClient: SyncClipboardClient?
 
     /// Normal foreground cadence. Public for tests / debug overrides; not a
     /// user setting.
-    @ObservationIgnored
     var normalCadenceSeconds: Double = 1.0
 
     /// Cadence applied while scene phase is `.inactive` — e.g. user
@@ -137,12 +126,10 @@ final class SyncEngine {
     /// minutes-long phone call wastes battery for no observable
     /// progress, so we throttle to 5s. `.active` transitions restore
     /// the 1Hz cadence on the next sleep.
-    @ObservationIgnored
     var inactiveCadenceSeconds: Double = 5.0
 
     /// Whether the engine should run at the reduced `inactiveCadenceSeconds`
     /// cadence. Driven by the view layer's `scenePhase` observer.
-    @ObservationIgnored
     var isSceneInactive: Bool = false
 
     /// Initial backoff applied to the FIRST network error. Subsequent
@@ -150,20 +137,17 @@ final class SyncEngine {
     /// (with ±20% jitter applied per-tick). A successful tick resets the
     /// backoff to this value. Public for tests that want to compress to
     /// zero.
-    @ObservationIgnored
     var offlineBackoffSeconds: Double = 5.0
 
     /// Hard ceiling on the exponential backoff. 60s keeps a long
     /// outage from extending past one minute between retries — long
     /// enough to not hammer a dead server, short enough that a recovered
     /// network surfaces in the UI within roughly a minute of reconnect.
-    @ObservationIgnored
     var offlineBackoffMaxSeconds: Double = 60.0
 
     /// Number of consecutive failed ticks. Drives the exponential
     /// backoff. Cleared on any successful tick (set via
     /// `markTickSucceeded`).
-    @ObservationIgnored
     private var consecutiveFailures: Int = 0
 
     /// Minimum gap between successive §2.7 `POST /api/history/query`
@@ -172,13 +156,11 @@ final class SyncEngine {
     /// of explicit user activity — 30s captures cross-device edits
     /// quickly enough without hammering the server. Public for tests
     /// that want to compress it to zero.
-    @ObservationIgnored
     var historySyncInterval: Double = 30.0
 
     /// Safety bound on the inner pagination loop. The empty-array
     /// sentinel is the documented end-of-list, so this only ever fires
     /// on a misbehaving server.
-    @ObservationIgnored
     var historySyncMaxPages: Int = 50
 
     /// When the last successful (or attempted) `runHistorySyncIfDue` ran.
@@ -188,7 +170,6 @@ final class SyncEngine {
     /// (in-memory only) re-ran the full §2.7 walk on every foreground,
     /// which is what landed dozens of POSTs in the server log per app
     /// open.
-    @ObservationIgnored
     private var lastHistorySyncAt: Date?
 
     /// Mutex for the history-sync coroutine. The live-clipboard tick used
@@ -197,7 +178,6 @@ final class SyncEngine {
     /// (observed: ~5s for a 20-page cold start). We now spawn it as a
     /// detached task, but two consecutive ticks could otherwise overlap;
     /// this flag drops the second entrant. Cleared in `defer`.
-    @ObservationIgnored
     private var isHistorySyncing: Bool = false
 
     init(viewModel: AppViewModel, store: SettingsStore) {
@@ -379,7 +359,6 @@ final class SyncEngine {
     /// land inside the window still run the local pasteboard observation
     /// but skip the server round-trip — backoff throttles the network, not
     /// the user's own clipboard. Explicit refreshes bypass the window.
-    @ObservationIgnored
     private var nextNetworkAttemptAt: Date?
 
     /// Exponential backoff with ±20% jitter. `consecutiveFailures == 1`

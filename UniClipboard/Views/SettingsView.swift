@@ -26,7 +26,7 @@ enum SettingsRoute: Hashable {
 }
 
 struct SettingsView: View {
-    @Bindable var vm: AppViewModel
+    @ObservedObject var vm: AppViewModel
     @Binding var path: [SettingsRoute]
 
     /// Drives the "功能引导" re-view: presents `OnboardingView` in review mode
@@ -481,13 +481,13 @@ private struct ServerEditView: View {
             nameDraft = server.name ?? ""
             urlsDraft = server.urls.isEmpty ? [""] : server.urls
         }
-        .onChange(of: nameDraft) { _, _ in
+        .onChange(of: nameDraft) { _ in
             // Commit on every keystroke — onDisappear is unreliable when
             // SwiftUI rebuilds the navigation stack mid-edit.
             let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
             server.name = trimmed.isEmpty ? nil : trimmed
         }
-        .onChange(of: urlsDraft) { _, _ in
+        .onChange(of: urlsDraft) { _ in
             // Same per-keystroke commit, filtered: the draft keeps blank
             // rows for editing comfort, the persisted config only the real
             // candidates. An all-blank draft leaves the stored urls alone
@@ -738,7 +738,7 @@ private struct StorageSettingsSection: View {
         .task(id: refreshTrigger) {
             await refreshSize()
         }
-        .onChange(of: appSettings.payloadCacheMaxBytes) { _, newValue in
+        .onChange(of: appSettings.payloadCacheMaxBytes) { newValue in
             Task {
                 await PayloadCache.shared.setMaxBytes(newValue)
                 await refreshSize()

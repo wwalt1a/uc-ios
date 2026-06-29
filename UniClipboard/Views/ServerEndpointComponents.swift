@@ -236,10 +236,10 @@ struct TestAllConnectionsSection: View {
             }
         }
         // Editing a probe-relevant field invalidates the last verdict.
-        .onChange(of: urls) { _, _ in resetOnEdit() }
-        .onChange(of: username) { _, _ in resetOnEdit() }
-        .onChange(of: password) { _, _ in resetOnEdit() }
-        .onChange(of: trustInsecureCert) { _, _ in resetOnEdit() }
+        .onChange(of: urls) { _ in resetOnEdit() }
+        .onChange(of: username) { _ in resetOnEdit() }
+        .onChange(of: password) { _ in resetOnEdit() }
+        .onChange(of: trustInsecureCert) { _ in resetOnEdit() }
         .onAppear {
             if let seed, !hasProbed, results.isEmpty {
                 orderedCandidates = candidates().filter { seed.results[$0] != nil }

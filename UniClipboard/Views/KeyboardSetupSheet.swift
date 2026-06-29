@@ -92,7 +92,7 @@ struct KeyboardSetupSheet: View {
         }
         .presentationDetents(allowsExpansion ? GuideSheetLayout.expandableDetents : GuideSheetLayout.detents)
         .presentationDragIndicator(.visible)
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase) { phase in
             if phase == .active { status = .current }
         }
     }

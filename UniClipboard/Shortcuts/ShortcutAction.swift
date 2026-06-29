@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 /// Home Screen quick-action tile that fires when the user long-presses
 /// the UniClipboard icon on the Springboard. The raw value is the wire
@@ -20,12 +20,12 @@ enum ShortcutAction: String, Hashable, Sendable {
 /// A singleton (rather than @State on the App struct) because the
 /// delegate fires *before* the SwiftUI view tree has mounted on cold
 /// launch; the value has to survive that gap so the consumer can drain
-/// it on first appear. `@Observable` lets SwiftUI re-render `ContentView`
-/// when a runtime invocation lands while the app is already on screen.
+/// it on first appear. `ObservableObject` lets SwiftUI re-render
+/// `ContentView` when a runtime invocation lands while the app is already
+/// on screen.
 @MainActor
-@Observable
-final class ShortcutInbox {
+final class ShortcutInbox: ObservableObject {
     static let shared = ShortcutInbox()
-    var pending: ShortcutAction?
+    @Published var pending: ShortcutAction?
     private init() {}
 }

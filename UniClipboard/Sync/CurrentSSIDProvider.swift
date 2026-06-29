@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import CoreLocation
 import Network
 import NetworkExtension
@@ -28,12 +29,11 @@ import NetworkExtension
 ///   point — it fires once on first init and again whenever the user
 ///   changes the setting in system Settings.
 ///
-/// This type is intentionally @MainActor + @Observable so SwiftUI views
+/// This type is intentionally @MainActor + ObservableObject so SwiftUI views
 /// can bind directly to `authState` / `currentSSID`. A single instance
 /// lives on `AppViewModel`.
 @MainActor
-@Observable
-final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDelegate {
+final class CurrentSSIDProvider: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     enum AuthState: Equatable, Sendable {
         case notDetermined
         case denied        // user said no, or Location services off, or restricted
@@ -43,19 +43,19 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
 
     /// Current authorization state, kept in sync with the system via the
     /// `CLLocationManagerDelegate` callback.
-    private(set) var authState: AuthState = .notDetermined
+    @Published private(set) var authState: AuthState = .notDetermined
 
     /// Last-read normalized SSID (per §5.1 `normalizeSSID`). `nil` means
     /// "no Wi-Fi connection" or "couldn't read". The UI must not assume
     /// a non-nil value implies the user is authorized — `authState` is
     /// the source of truth for that.
-    private(set) var currentSSID: String?
+    @Published private(set) var currentSSID: String?
 
     /// Whether the current network path uses Wi-Fi. Unlike the SSID *name*
     /// this needs no entitlement or Location grant, so the §5.3 "prefer the
     /// LAN URL on Wi-Fi" ordering works even when the user denied Location.
     /// Same NWPathMonitor freshness caveats as `isCellular`.
-    private(set) var isWifi: Bool = false
+    @Published private(set) var isWifi: Bool = false
 
     /// Whether the current network path uses cellular. Read by
     /// `SyncEngine` to gate the cache prefetch (cellular bytes are
@@ -63,13 +63,13 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
     /// asynchronously off the NWPathMonitor callback, so a freshly-
     /// flipped airplane mode can lag by a tick — acceptable, the
     /// read-through fallback covers any miss.
-    private(set) var isCellular: Bool = false
+    @Published private(set) var isCellular: Bool = false
 
     /// Whether a Tailscale virtual network is up (a local interface holds an
     /// IPv4 in 100.64.0.0/10 — see `TailscaleDetector`). Highest-priority §5.3
     /// tier. Re-checked off the same NWPathMonitor callback as `isCellular`,
     /// since the VPN coming up / going down changes the path.
-    private(set) var isTailscale: Bool = false
+    @Published private(set) var isTailscale: Bool = false
 
     /// Current network as a §5.3 `NetworkContext`, fed to
     /// `ServerConfigList.effectiveActiveConfig(network:)`.
@@ -82,16 +82,12 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
         )
     }
 
-    @ObservationIgnored
     private let manager: CLLocationManager
 
-    @ObservationIgnored
     private let mockSSID: String?
 
-    @ObservationIgnored
     private let pathMonitor: NWPathMonitor
 
-    @ObservationIgnored
     private let pathQueue = DispatchQueue(label: "app.uniclipboard.ssid-path", qos: .utility)
 
     /// Fires when the network context actually changes — SSID, cellular, or
@@ -99,11 +95,9 @@ final class CurrentSSIDProvider: NSObject, @preconcurrency CLLocationManagerDele
     /// publish the SSID cross-process and reset engine state when a network
     /// change flips the §5.3 effective server. Not part of the observable
     /// surface — purely an out-of-band hook.
-    @ObservationIgnored
     var onNetworkChanged: ((_ context: NetworkContext) -> Void)?
 
     /// Last context handed to `onNetworkChanged`, for change-deduplication.
-    @ObservationIgnored
     private var lastPublishedContext: NetworkContext?
 
     override init() {

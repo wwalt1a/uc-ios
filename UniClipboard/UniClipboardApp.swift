@@ -19,7 +19,7 @@ struct UniClipboardApp: App {
     // snapshot, so a tile that only exists at runtime may never appear.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    @State private var vm = AppViewModel()
+    @StateObject private var vm = AppViewModel()
 
     init() {
         // Must run before any other code so the crash handler covers the

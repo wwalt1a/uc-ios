@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct ContentView: View {
-    @Bindable var vm: AppViewModel
+    @ObservedObject var vm: AppViewModel
+    @ObservedObject private var shortcutInbox = ShortcutInbox.shared
 
     @State private var showingSettings = false
 
@@ -52,11 +53,11 @@ struct ContentView: View {
     }
 
     var body: some View {
-        // Read inside body so the Observation framework registers
-        // `ContentView` as an observer of `ShortcutInbox.shared.pending`
-        // — without this read, `.onChange` would never fire when the
-        // delegate writes a runtime shortcut invocation.
-        let pendingShortcut = ShortcutInbox.shared.pending
+        // Read inside body so `ContentView` observes
+        // `ShortcutInbox.shared.pending`; without this read, `.onChange`
+        // would never fire when the delegate writes a runtime shortcut
+        // invocation.
+        let pendingShortcut = shortcutInbox.pending
 
         return Group {
             if showOnboarding {
@@ -82,14 +83,15 @@ struct ContentView: View {
         .onOpenURL { vm.handleIncomingURL($0) }
         // Runtime path: app already on screen when a quick action fires.
         // The delegate writes to the inbox, body re-renders, onChange
-        // sees the transition and dispatches. `initial: true` covers the
+        // sees the transition and dispatches. `onAppear` covers the
         // cold-launch case where the delegate wrote *before* SwiftUI
         // mounted, so `pendingShortcut` is non-nil on the very first
         // body evaluation and no nil→value transition will occur.
-        .onChange(of: pendingShortcut, initial: true) { _, action in
-            guard let action else { return }
-            ShortcutInbox.shared.pending = nil
-            Task { await vm.runShortcut(action) }
+        .onAppear {
+            consumeShortcut(pendingShortcut)
+        }
+        .onChange(of: pendingShortcut) { action in
+            consumeShortcut(action)
         }
         // Confirmation sheet — only meaningful when configs is non-empty.
         // While in Setup, the SetupFlowView's `.task(id:)` consumes
@@ -114,6 +116,12 @@ struct ContentView: View {
         } message: { err in
             Text(connectURIErrorMessage(err))
         }
+    }
+
+    private func consumeShortcut(_ action: ShortcutAction?) {
+        guard let action else { return }
+        shortcutInbox.pending = nil
+        Task { await vm.runShortcut(action) }
     }
 
     private var mainContent: some View {
@@ -191,7 +199,7 @@ struct ContentView: View {
                 }
             }
         }
-        .onChange(of: scenePhase) { _, newPhase in
+        .onChange(of: scenePhase) { newPhase in
             switch newPhase {
             case .active:
                 // Pick up history rows the keyboard / share extension appended

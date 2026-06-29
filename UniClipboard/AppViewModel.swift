@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 import OSLog
 import SentryWithoutUIKit
 
@@ -9,13 +9,12 @@ private let log = Logger(subsystem: "app.uniclipboard", category: "app")
 /// automatically. Sits between the views and `SettingsStore`.
 ///
 /// Lives in the app layer (not in the SwiftPM `Models` target) because
-/// `@Observable` and `@MainActor` are SwiftUI-shaped concerns; the model
-/// types it carries (`ServerConfigList`, `AppSettings`) are the
+/// `ObservableObject` and `@MainActor` are SwiftUI-shaped concerns; the
+/// model types it carries (`ServerConfigList`, `AppSettings`) are the
 /// Foundation-only ones from `Models/`.
 @MainActor
-@Observable
-final class AppViewModel {
-    var servers: ServerConfigList {
+final class AppViewModel: ObservableObject {
+    @Published var servers: ServerConfigList {
         didSet {
             store.saveServers(servers)
             // A manual pick / add / delete / edit may change which server is
@@ -30,14 +29,14 @@ final class AppViewModel {
         }
     }
 
-    var appSettings: AppSettings {
+    @Published var appSettings: AppSettings {
         didSet { store.saveAppSettings(appSettings) }
     }
 
     /// Last clipboard fetched from the active server. Runtime state, not
     /// persisted — spec §5.5 doesn't list a key for it and stale data on
     /// cold launch would mislead.
-    var serverLatest: Clipboard?
+    @Published var serverLatest: Clipboard?
 
     /// Recent clipboard entries shown on the Home list, newest-first.
     /// `SyncEngine` is the canonical writer — it appends a `.pulled` entry
@@ -46,7 +45,7 @@ final class AppViewModel {
     /// the App Group via `SettingsStore.saveHistory` on every mutation,
     /// so cold launches recover the same list the user just saw.
     /// Hydrated from disk in `init`; previews override post-init.
-    var history: [ClipboardHistoryItem] = [] {
+    @Published var history: [ClipboardHistoryItem] = [] {
         didSet { store.saveHistory(history) }
     }
 
@@ -61,50 +60,50 @@ final class AppViewModel {
     /// `modifiedAfter` so the server only returns strictly newer records.
     /// `nil` triggers a full pull on the next sync (cold-launch state, or
     /// after switching servers). Persisted as ISO-8601 via `SettingsStore`.
-    var historyWatermark: Date? {
+    @Published var historyWatermark: Date? {
         didSet { store.saveHistoryWatermark(historyWatermark) }
     }
 
     /// When `serverLatest` was last refreshed (success or 404). Reset on
     /// every `refresh()` outcome so the UI's "5 minutes ago" label tracks
     /// reality.
-    var lastSyncedAt: Date?
+    @Published var lastSyncedAt: Date?
 
     /// Last error from `refresh()`. Cleared on success.
-    var refreshError: SyncError?
+    @Published var refreshError: SyncError?
 
     /// Whether a refresh is in flight.
-    var isRefreshing: Bool = false
+    @Published var isRefreshing: Bool = false
 
     /// When the device clipboard was last successfully pushed to the
     /// active server. Runtime state — not persisted. Cleared on push
     /// failure so the UI doesn't show a misleading "上次推送 5 秒前"
     /// next to a fresh error banner.
-    var lastPushedAt: Date?
+    @Published var lastPushedAt: Date?
 
     /// Last error from `push()`. Cleared on success.
-    var pushError: SyncError?
+    @Published var pushError: SyncError?
 
     /// Whether a push is in flight.
-    var isPushing: Bool = false
+    @Published var isPushing: Bool = false
 
     /// Whether `applyServerToDevice()` is in flight (long-text path only;
     /// short text completes synchronously and never sets this).
-    var isApplying: Bool = false
+    @Published var isApplying: Bool = false
 
     /// Last error from `applyServerToDevice()`. Cleared on success.
-    var applyError: SyncError?
+    @Published var applyError: SyncError?
 
     /// Whether `saveServerAttachment()` is in flight.
-    var isSaving: Bool = false
+    @Published var isSaving: Bool = false
 
     /// Last error from `saveServerAttachment()`. Cleared on success.
-    var saveError: SyncError?
+    @Published var saveError: SyncError?
 
     /// File URL of the most-recent successful `saveServerAttachment()`.
     /// Cleared on the next refresh or save attempt so the UI's
     /// "已保存到 …" caption doesn't outlive its relevance.
-    var lastSavedFileURL: URL?
+    @Published var lastSavedFileURL: URL?
 
     /// Parsed `uniclipboard://connect?…` payload waiting for the user to
     /// approve or reject. Set by `handleIncomingURL(_:)` when a connect
@@ -114,29 +113,27 @@ final class AppViewModel {
     ///  • configs non-empty → a confirmation sheet appears with a masked
     ///    preview; the user appends the new server or dismisses.
     /// Cleared via `consumePendingImport()` once the view has taken over.
-    var pendingImport: ConnectURI.Payload?
+    @Published var pendingImport: ConnectURI.Payload?
 
     /// Last `ConnectURI.parse` failure surfaced from `handleIncomingURL`.
     /// Drives a root-level alert so the user notices that the QR scanned
     /// from the Camera app didn't actually do anything. Cleared on the
     /// next successful URL or when the alert dismisses.
-    var importError: ConnectURI.ParseError?
+    @Published var importError: ConnectURI.ParseError?
 
     /// Display name of the most-recent successful `applyAttachment(for:)`
     /// — drives the bottom-banner "已复制 <name> 到剪贴板". Same
     /// transient-feedback lifecycle as `lastSavedFileURL`; cleared on the
     /// next refresh / apply / save attempt.
-    var lastAppliedAttachmentName: String?
+    @Published var lastAppliedAttachmentName: String?
 
     /// Current device pasteboard snapshot. Computed; the observer is the
-    /// source of truth and `@Observable` propagates its `current` reads
-    /// through this accessor automatically.
+    /// source of truth and its `objectWillChange` is bridged into this view
+    /// model so views refresh when `current` changes.
     var deviceClipboard: Clipboard? { pasteboard.current }
 
-    @ObservationIgnored
     private let store: SettingsStore
 
-    @ObservationIgnored
     private let pasteboard: DevicePasteboardObserver
 
     /// Auto-sync engine. Constructed during init, started/stopped by the
@@ -144,7 +141,6 @@ final class AppViewModel {
     /// unwrapped because `SyncEngine.init` needs a fully-initialized
     /// `AppViewModel` reference, which only exists after all other stored
     /// properties are assigned.
-    @ObservationIgnored
     private(set) var engine: SyncEngine!
 
     /// Reads the current Wi-Fi SSID via `CNCopyCurrentNetworkInfo`. Owned
@@ -152,6 +148,8 @@ final class AppViewModel {
     /// (Settings → Servers) and the SetupFlow auto-switch step.
     /// Observable — views bind directly to `authState` / `currentSSID`.
     let ssidProvider: CurrentSSIDProvider
+
+    private var cancellables = Set<AnyCancellable>()
 
     /// - Parameters:
     ///   - store: persistence backend; default uses `UserDefaults.standard`.
@@ -177,6 +175,7 @@ final class AppViewModel {
         self.historyWatermark = store.loadHistoryWatermark()
         self.ssidProvider = CurrentSSIDProvider()
         self.engine = SyncEngine(viewModel: self, store: store)
+        bridgeNestedObjectChanges()
         // A network change can now flip the *effective* server on its own
         // (§5.3 on-demand auto-switch — Wi-Fi SSID, cellular, or other). On
         // each change we publish the SSID to the App Group (so the keyboard
@@ -208,6 +207,24 @@ final class AppViewModel {
         }
     }
 
+    private func bridgeNestedObjectChanges() {
+        engine.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.objectWillChange.send() }
+            }
+            .store(in: &cancellables)
+        ssidProvider.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.objectWillChange.send() }
+            }
+            .store(in: &cancellables)
+        pasteboard.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.objectWillChange.send() }
+            }
+            .store(in: &cancellables)
+    }
+
     /// Mark the first-run onboarding (feature walkthrough) as finished. Flips
     /// `onboardingShown` (persisted via the `appSettings` didSet) so
     /// `ContentView` stops routing into `OnboardingView` and falls through to
@@ -224,8 +241,8 @@ final class AppViewModel {
     /// fallbacks, so `urls[0]` (== `url`, what the per-tick client builder
     /// reads) is the best-known path. Which *profile* is active stays the
     /// user's manual pick — the network only re-orders that profile's URLs.
-    /// `servers`, `liveURL`, and `ssidProvider`'s fields are all
-    /// `@Observable`, so views recompute when any of them changes.
+    /// `servers`, `liveURL`, and `ssidProvider` changes all publish through
+    /// this view model, so views recompute when any of them changes.
     var activeServer: ServerConfig? {
         guard var cfg = servers.activeConfig else { return nil }
         cfg.urls = cfg.preferredURLs(live: liveURL, network: ssidProvider.networkContext)
@@ -261,7 +278,6 @@ final class AppViewModel {
     /// `reconcileActiveServer`, so a `servers` mutation or SSID change that
     /// leaves the effective server untouched doesn't needlessly reset the
     /// engine. Pure bookkeeping — not view state.
-    @ObservationIgnored
     private var lastEffectiveServerId: String?
 
     /// Reconcile the engine against the current effective server (§5.3).
@@ -321,14 +337,12 @@ final class AppViewModel {
     /// transition; whichever probes those events start, only one epoch's
     /// verdict can win). Wraps on overflow (`&+=`) — equality is all we
     /// compare.
-    @ObservationIgnored
     private var networkEpoch: UInt64 = 0
 
     /// Epoch of the last probe whose verdict was *adopted* (completed with
     /// its epoch still current). Scopes the debounce: within one epoch,
     /// non-forced probes are debounced; the first probe of a new epoch is
     /// answering a brand-new question and must never be suppressed.
-    @ObservationIgnored
     private var lastAdoptedProbeEpoch: UInt64?
 
     /// Profile the last adopted verdict was probed for. Without this, a
@@ -336,19 +350,16 @@ final class AppViewModel {
     /// the epoch "answered" and the joiner waiting on it (the profile
     /// switch's own forced refresh) would return without ever probing the
     /// NEW profile's candidates.
-    @ObservationIgnored
     private var lastAdoptedProbeConfigId: String?
 
     /// In-flight probe, for deduplication — a second caller awaits the
     /// running probe instead of stacking another. Not view state.
-    @ObservationIgnored
     private var liveProbeTask: Task<Void, Never>?
 
     /// When the last probe *finished*, for debouncing. The engine retries a
     /// failing GET at 1Hz and asks for a re-probe on every failure; without
     /// this window each tick would burn a full probe round against every
     /// candidate.
-    @ObservationIgnored
     private var lastLiveProbeAt: Date?
 
     /// Minimum gap between non-forced probes *within one network epoch*.

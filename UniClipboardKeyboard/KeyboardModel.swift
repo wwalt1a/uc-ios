@@ -1,8 +1,8 @@
 import Foundation
 import UIKit
 import ImageIO
+import Combine
 import Network
-import Observation
 import OSLog
 
 private let log = Logger(subsystem: "app.uniclipboard.keyboard", category: "sync")
@@ -23,8 +23,7 @@ private let log = Logger(subsystem: "app.uniclipboard.keyboard", category: "sync
 /// on main; network work hops off via `await` on the non-isolated
 /// `SyncClipboardClient`.
 @MainActor
-@Observable
-final class KeyboardModel {
+final class KeyboardModel: ObservableObject {
 
     // MARK: - Top-level gate
 
@@ -76,45 +75,45 @@ final class KeyboardModel {
 
     // MARK: - Published state
 
-    var hasFullAccess: Bool = false
-    var needsInputModeSwitchKey: Bool = true
+    @Published var hasFullAccess: Bool = false
+    @Published var needsInputModeSwitchKey: Bool = true
 
     /// Key-feedback prefs, mirrored from `AppSettings` (App Group). Read
     /// once on appear and re-read on each sync pass so a change made in the
     /// main app takes effect the next time the keyboard opens. Default true
     /// so a fresh install feels like a stock keyboard.
-    private(set) var soundFeedback = true
-    private(set) var hapticFeedback = true
+    @Published private(set) var soundFeedback = true
+    @Published private(set) var hapticFeedback = true
 
-    private(set) var gate: Gate = .ok
+    @Published private(set) var gate: Gate = .ok
     /// Drives the header's refresh spinner. Independent of `cards` so a sync
     /// pass never blanks out the already-visible row.
-    private(set) var isSyncing: Bool = false
+    @Published private(set) var isSyncing: Bool = false
     /// Set on a failed pull / tap-fetch. Rendered as an inline chip (cards
     /// present) or a full hint + retry (no cards).
-    private(set) var lastError: String?
-    private(set) var cards: [Card] = []
-    private(set) var pushStatus: PushStatus = .none
+    @Published private(set) var lastError: String?
+    @Published private(set) var cards: [Card] = []
+    @Published private(set) var pushStatus: PushStatus = .none
     /// The entry the most recent uplink actually uploaded. Read by the
     /// downlink half to decide whether the server's latest is our own push
     /// (→ adopt its hash as watermark) or someone else's (→ treat as pull).
     private var lastPushedEntry: Clipboard?
     /// Brief success/failure badge on the refresh button; auto-clears.
-    private(set) var syncFlash: SyncFlash?
-    private(set) var serverLabel: String = ""
+    @Published private(set) var syncFlash: SyncFlash?
+    @Published private(set) var serverLabel: String = ""
 
     /// The card whose deferred payload (long text / image) is being fetched,
     /// so just that card can show a spinner.
-    private(set) var actingCardID: UUID?
+    @Published private(set) var actingCardID: UUID?
     /// Briefly set right after an insert/copy so the tapped card can flash a
     /// "已插入 / 已复制" confirmation without a separate state machine.
-    private(set) var actedCardID: UUID?
+    @Published private(set) var actedCardID: UUID?
 
     /// Context-appropriate label for the Return key, derived from the host
     /// field's `returnKeyType` (发送 / 搜索 / …). `nil` ⇒ render the ↵ glyph.
     /// Set by the controller; a custom keyboard can read the type but can
     /// only ever *insert a newline*, which most single-line fields submit on.
-    private(set) var returnKeyTitle: String?
+    @Published private(set) var returnKeyTitle: String?
 
     /// Server + trust resolved on the last sync pass, reused by a card tap to
     /// fetch its deferred payload / thumbnail without re-reading the store.
@@ -326,7 +325,7 @@ final class KeyboardModel {
     // MARK: - Server switching
 
     /// Snapshot of the configured servers for the inline switcher overlay.
-    /// Read on demand (the store isn't `@Observable`); the overlay captures
+    /// Read on demand (the store is not observable); the overlay captures
     /// the result when it opens.
     func serverChoices() -> (servers: [ServerConfig], activeId: String?) {
         let list = store.loadServers()

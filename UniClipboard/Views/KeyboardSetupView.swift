@@ -71,7 +71,7 @@ struct KeyboardSetupView: View {
                 showSetupSheet = true
             }
         }
-        .onChange(of: scenePhase) { _, newPhase in
+        .onChange(of: scenePhase) { newPhase in
             if newPhase == .active { keyboardStatus = .current }
         }
         .sheet(isPresented: $showSetupSheet) {

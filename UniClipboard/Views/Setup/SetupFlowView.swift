@@ -11,7 +11,7 @@ import SwiftUI
 /// - `UC_PREFILL_TEST=success|authFailed|unreachable|missingFields`
 ///                                → seed the test-connection result
 struct SetupFlowView: View {
-    @Bindable var vm: AppViewModel
+    @ObservedObject var vm: AppViewModel
     var onComplete: () -> Void
 
     @State private var path: [Step] = Step.initialPath()

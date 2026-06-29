@@ -67,7 +67,7 @@ private let keyboardSurfaceColor = Color(uiColor: UIColor { trait in
 /// newly-copied device content (uplink). The 🌐 strip returns to a typing
 /// keyboard.
 struct KeyboardRootView: View {
-    let model: KeyboardModel
+    @ObservedObject var model: KeyboardModel
 
     /// Search mode swaps the server-name bar for a type-scope filter strip
     /// (a custom keyboard has no QWERTY, so 🔍 filters rather than queries).
@@ -175,15 +175,15 @@ struct KeyboardRootView: View {
             HStack(spacing: 0) {
                 if model.gate != .needsFullAccess, !model.cards.isEmpty {
                     circleButton(system: "magnifyingglass") {
-                        withAnimation(.snappy(duration: 0.22)) { searching = true }
+                        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) { searching = true }
                     }
                     .accessibilityLabel(Text("筛选"))
                 }
                 Spacer(minLength: 0)
                 if model.gate != .needsFullAccess {
                     syncButton
-                        .animation(.snappy(duration: 0.28), value: model.isSyncing)
-                        .animation(.snappy(duration: 0.28), value: model.syncFlash)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: model.isSyncing)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: model.syncFlash)
                 }
             }
         }
@@ -228,7 +228,7 @@ struct KeyboardRootView: View {
             // 14pt: the ✕ sits beside footnote chip labels — the default 16
             // read heavier than the chips and pulled focus.
             circleButton(system: "xmark", size: 14) {
-                withAnimation(.snappy(duration: 0.22)) {
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
                     searching = false
                     filter = .all
                 }
@@ -245,7 +245,7 @@ struct KeyboardRootView: View {
                     let isOn = f == filter
                     Button {
                         model.keyFeedback()
-                        withAnimation(.snappy(duration: 0.2)) { filter = f }
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.86)) { filter = f }
                     } label: {
                         Text(f.title)
                             .font(.footnote.weight(.semibold))
@@ -297,25 +297,7 @@ struct KeyboardRootView: View {
     private var cardArea: some View {
         let cards = displayedCards
         if !cards.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                // Lazy so off-screen image cards don't all fire their
-                // thumbnail fetch at once — bounds concurrent network + decode
-                // work to what's near the viewport (keyboard memory).
-                LazyHStack(spacing: 12) {
-                    ForEach(cards) { card in
-                        CardView(model: model, card: card)
-                    }
-                }
-                .scrollTargetLayout()
-                .padding(.vertical, KeyboardLayout.cardRowVPad)
-            }
-            // contentMargins (not padding inside the stack) keeps the resting
-            // first card on the shared hMargin grid while still letting cards
-            // bleed to the screen edge mid-scroll.
-            .contentMargins(.horizontal, KeyboardLayout.hMargin, for: .scrollContent)
-            .scrollTargetBehavior(.viewAligned)
-            .keyboardScrollEdgeEffectHidden()
-            .frame(maxHeight: .infinity)
+            cardScroll(cards)
         } else if model.isSyncing {
             centered {
                 HStack(spacing: 8) {
@@ -348,6 +330,42 @@ struct KeyboardRootView: View {
         }
     }
 
+    @ViewBuilder
+    private func cardScroll(_ cards: [KeyboardModel.Card]) -> some View {
+        if #available(iOS 17.0, *) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                // Lazy so off-screen image cards don't all fire their
+                // thumbnail fetch at once — bounds concurrent network + decode
+                // work to what's near the viewport (keyboard memory).
+                LazyHStack(spacing: 12) {
+                    ForEach(cards) { card in
+                        CardView(model: model, card: card)
+                    }
+                }
+                .scrollTargetLayout()
+                .padding(.vertical, KeyboardLayout.cardRowVPad)
+            }
+            // contentMargins (not padding inside the stack) keeps the resting
+            // first card on the shared hMargin grid while still letting cards
+            // bleed to the screen edge mid-scroll.
+            .contentMargins(.horizontal, KeyboardLayout.hMargin, for: .scrollContent)
+            .scrollTargetBehavior(.viewAligned)
+            .keyboardScrollEdgeEffectHidden()
+            .frame(maxHeight: .infinity)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 12) {
+                    ForEach(cards) { card in
+                        CardView(model: model, card: card)
+                    }
+                }
+                .padding(.horizontal, KeyboardLayout.hMargin)
+                .padding(.vertical, KeyboardLayout.cardRowVPad)
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+
     private var emptyFilterIcon: String {
         switch filter {
         case .all:   "tray"
@@ -372,11 +390,11 @@ struct KeyboardRootView: View {
         let choices = model.serverChoices()
         serverChoices = choices.servers
         activeServerId = choices.activeId
-        withAnimation(.snappy(duration: 0.22)) { switchingServer = true }
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) { switchingServer = true }
     }
 
     private func closeSwitcher() {
-        withAnimation(.snappy(duration: 0.2)) { switchingServer = false }
+        withAnimation(.spring(response: 0.2, dampingFraction: 0.86)) { switchingServer = false }
     }
 
     private var serverSwitcherOverlay: some View {
@@ -834,10 +852,16 @@ private struct CardThumbnail: View {
                         .scaledToFill()
                         .transition(.opacity)
                 } else {
-                    Image(systemName: didLoad ? "photo" : "photo.badge.arrow.down")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                        .symbolEffect(.pulse, isActive: !didLoad)
+                    if #available(iOS 17.0, *) {
+                        Image(systemName: didLoad ? "photo" : "photo.badge.arrow.down")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                            .symbolEffect(.pulse, isActive: !didLoad)
+                    } else {
+                        Image(systemName: didLoad ? "photo" : "photo.badge.arrow.down")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .clipShape(shape)

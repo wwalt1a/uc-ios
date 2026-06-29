@@ -17,7 +17,7 @@ import UIKit
 ///   whole UX.
 struct ClipboardPreviewSheet: View {
     let item: ClipboardHistoryItem
-    @Bindable var vm: AppViewModel
+    @ObservedObject var vm: AppViewModel
 
     @Environment(\.dismiss) private var dismiss
 
@@ -30,7 +30,7 @@ struct ClipboardPreviewSheet: View {
 
     /// Cached decoded long-text body. Decoding `Data` → `String` once on
     /// load() avoids re-running UTF-8 decode on every body re-render —
-    /// SwiftUI invalidates this view often (vm @Observable churn), and
+    /// SwiftUI invalidates this view often (view-model churn), and
     /// re-decoding multi-MB payloads on the main thread is what makes
     /// long-text preview feel frozen.
     @State private var decodedText: String?

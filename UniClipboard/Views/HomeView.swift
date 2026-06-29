@@ -7,7 +7,7 @@ import UIKit
 /// `ClipboardCard` cells. Supports search, multi-select, long-press preview
 /// overlay, and a bottom toolbar for search / server picker / sync.
 struct HomeView: View {
-    @Bindable var vm: AppViewModel
+    @ObservedObject var vm: AppViewModel
 
     /// Injected by `ContentView` so the error-detail sheet's "去设置" CTA
     /// can flip the TabView selection without HomeView knowing about it.
@@ -122,7 +122,7 @@ struct HomeView: View {
                     }
                 }
             }
-            .animation(.snappy, value: showPasteHint)
+            .animation(.spring(response: 0.28, dampingFraction: 0.86), value: showPasteHint)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomBar
             }
@@ -296,21 +296,25 @@ struct HomeView: View {
             // exactly when the user most wants to retry.
             GeometryReader { proxy in
                 ScrollView(.vertical) {
-                    ContentUnavailableView {
-                        Label {
+                    VStack(spacing: 16) {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 42, weight: .regular))
+                            .foregroundStyle(.secondary)
+                        VStack(spacing: 6) {
                             Text("还没有同步过剪贴板")
-                        } icon: {
-                            Image(systemName: "doc.on.clipboard")
+                                .font(.headline)
+                            Text("服务器的新内容会自动出现在这里；本机内容点下方按钮推送")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
-                    } description: {
-                        Text("服务器的新内容会自动出现在这里；本机内容点下方按钮推送")
-                    } actions: {
                         PasteButton(supportedContentTypes: PastedItemExtractor.supportedContentTypes) { providers in
                             Task { await vm.pushPastedProviders(providers) }
                         }
                         .tint(.accentColor)
                         .accessibilityLabel(Text("推送本机剪贴板到服务器"))
                     }
+                    .padding(.horizontal, 32)
                     .frame(minHeight: proxy.size.height)
                 }
             }
@@ -326,16 +330,19 @@ struct HomeView: View {
                 .padding(.bottom, 16)
             }
             .scrollEdgeEffectStyleSoftTopBottom()
-            .animation(.snappy, value: pinnedItemId)
+            .animation(.spring(response: 0.28, dampingFraction: 0.86), value: pinnedItemId)
             // Fire a light haptic when a successful copy promotes an item to
             // the pin slot. Replaces the old per-call UIImpactFeedbackGenerator.
-            .sensoryFeedback(.impact(weight: .light), trigger: pinnedItemId)
+            .onChange(of: pinnedItemId) { id in
+                guard id != nil else { return }
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
             .task { preloadThumbnails() }
             // Watch the array itself, not just its count: a push completion
             // flips the head row's direction IN PLACE (same-hash dedup), and
             // that's exactly the moment a previously-failed thumbnail load
             // (it raced the PUT) becomes satisfiable from the local cache.
-            .onChange(of: vm.history) { _, _ in preloadThumbnails() }
+            .onChange(of: vm.history) { _ in preloadThumbnails() }
         }
     }
 
@@ -407,7 +414,7 @@ struct HomeView: View {
                 .accessibilityLabel(Text("筛选"))
 
                 Button {
-                    withAnimation(.snappy) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                         isSearching = false
                         searchText = ""
                         filterTypes = []
@@ -506,8 +513,8 @@ struct HomeView: View {
             await loadThumbnailIfNeeded(for: item)
             await loadURLMetadataIfNeeded(for: item)
         }
-        .animation(.snappy, value: isSelectMode)
-        .animation(.snappy, value: isSelected)
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isSelectMode)
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isSelected)
     }
 
     /// VoiceOver label for a card: kind + a short content snippet.
@@ -553,7 +560,7 @@ struct HomeView: View {
                 isSyncing: isExplicitlyRefreshing,
                 glassNamespace: glassNS,
                 onSearch: {
-                    withAnimation(.snappy) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                         isSearching = true
                     }
                 },
@@ -637,10 +644,10 @@ struct HomeView: View {
         switch item.entry.displayKind {
         case .text, .url:
             vm.reapplyHistoryItem(item)
-            withAnimation(.snappy) {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                 pinnedItemId = item.id
             }
-            // Haptic fires via `.sensoryFeedback(trigger: pinnedItemId)` on
+            // Haptic fires from the `pinnedItemId` change handler on
             // the grid — setting the pin above is the trigger.
             schedulePinReset()
             Task { await vm.pushHistoryEntryToServer(item) }
@@ -653,7 +660,7 @@ struct HomeView: View {
                 loadingItemIds.remove(item.id)
                 guard vm.applyError == nil else { return }
                 vm.reapplyHistoryItem(item)
-                withAnimation(.snappy) {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                     pinnedItemId = item.id
                 }
                 schedulePinReset()
@@ -664,7 +671,7 @@ struct HomeView: View {
             // reapplyHistoryItem copies the filename as text through the
             // observer (adopted write) — no raw UIPasteboard write here.
             vm.reapplyHistoryItem(item)
-            withAnimation(.snappy) {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                 pinnedItemId = item.id
             }
             schedulePinReset()
@@ -695,7 +702,7 @@ struct HomeView: View {
     private func schedulePinReset() {
         Task {
             try? await Task.sleep(for: .seconds(2))
-            withAnimation(.snappy) {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                 pinnedItemId = nil
             }
         }
@@ -1106,7 +1113,7 @@ private struct IssueDetailSheet: View {
 // MARK: - Server Switcher Sheet
 
 private struct ServerSwitcherSheet: View {
-    @Bindable var vm: AppViewModel
+    @ObservedObject var vm: AppViewModel
     let onSelect: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -1369,7 +1376,7 @@ private func formatSize(_ size: Int, kind: ClipboardDisplayKind) -> String {
 /// Async-loaded images/long-text are fetched lazily in `.task`.
 private struct CardPreviewView: View {
     let item: ClipboardHistoryItem
-    @Bindable var vm: AppViewModel
+    @ObservedObject var vm: AppViewModel
 
     @State private var loadedImage: UIImage?
     @State private var loadedText: String?
